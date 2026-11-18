@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cafedelyon
+description: 커피숍 물류·회계 통합 시스템 (Espresso) — auth/core/settlement/web + PostgreSQL primary·standby
+type: application
+version: 0.1.0
+appVersion: "0.4"

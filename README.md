@@ -46,3 +46,26 @@ cd deploy/compose && docker compose up -d --build # PostgreSQL primary+standby, 
 | 전자세금계산서 | 대기열 + 승인번호 수기 입력 (발행 대행사 선정 후 연동) |
 | 레시피 기반 재고 차감, POS 연동, 매장 간 이동 | 4차 범위 |
 | 급여 요율·간이세액표 | 데모 값/추정 — 운영 전 고시값 등록 필요 |
+
+## Kubernetes 배포 (cafedelyon)
+
+| 항목 | 값 |
+|---|---|
+| 주소 | https://lyon.studiobasa.com (공용 Gateway `default/gateway` 에 HTTPRoute 연결) |
+| 네임스페이스 | `cafedelyon` |
+| 이미지 | `registry.local.cloud:5000/cafedelyon/{auth,core,settlement,web}:<커밋 7자리>` — `deploy/images.sh [--push]` |
+| 차트 | `deploy/helm/cafedelyon` (PostgreSQL primary+standby StatefulSet, 서비스 4개, 업로드 PVC, 업로드 크기 정책) |
+
+```bash
+# 1) DB 자격 증명 Secret — 운영자가 직접 생성 (차트·저장소에 값 없음)
+kubectl create namespace cafedelyon
+kubectl -n cafedelyon create secret generic cafedelyon-db \
+  --from-literal=postgres-password='<직접 정한 값>' --from-literal=replication-password='<직접 정한 값>'
+# 2) 이미지
+deploy/images.sh --push
+# 3) 설치·업그레이드
+helm upgrade --install cafedelyon deploy/helm/cafedelyon -n cafedelyon --set image.tag=$(git rev-parse --short=7 HEAD)
+```
+- TLS: 공용 인증서(`default/letsencrypt-issuer-public-cert`)의 dnsNames 에 도메인 추가 필요(공용 리소스 변경).
+- DNS: Cloudflare 에 `lyon.studiobasa.com` 레코드 필요.
+- 서명 키(메모리)·Outbox 순서 때문에 auth·core 는 1개 인스턴스. 데모 데이터는 `demo.seed=false` 로 끔.

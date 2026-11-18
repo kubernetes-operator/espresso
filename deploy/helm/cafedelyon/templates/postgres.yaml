@@ -1,0 +1,108 @@
+# PostgreSQL 16 primary + streaming standby (설계 §4: DB 2중화). 비밀번호는 existingSecret 에서만 읽음
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pg-scripts
+  labels: {{- include "cdl.labels" . | nindent 4 }}
+data:
+  10-init.sh: |
+    #!/bin/bash
+    # primary 최초 기동 시 1회: DB 3개 + 복제 계정·슬롯 + 복제 접속 허용(비밀번호 인증)
+    set -e
+    psql -v ON_ERROR_STOP=1 -U postgres --set=rp="$REPLICATION_PASSWORD" <<'SQL'
+    CREATE DATABASE auth_db;
+    CREATE DATABASE core_db;
+    CREATE DATABASE settlement_db;
+    CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD :'rp';
+    SELECT pg_create_physical_replication_slot('standby1');
+    SQL
+    echo "host replication replicator all scram-sha-256" >> "$PGDATA/pg_hba.conf"
+  standby.sh: |
+    #!/bin/bash
+    # standby: 데이터가 없으면 primary 에서 base backup → streaming replication 으로 기동
+    set -e
+    export PGPASSFILE=/tmp/.pgpass
+    echo "pg-primary:5432:*:replicator:${REPLICATION_PASSWORD}" > "$PGPASSFILE"; chmod 600 "$PGPASSFILE"
+    if [ ! -s "$PGDATA/PG_VERSION" ]; then
+      until pg_isready -h pg-primary -U postgres; do echo "waiting primary"; sleep 3; done
+      pg_basebackup -h pg-primary -U replicator -D "$PGDATA" -X stream -S standby1 -R -P
+      chmod 700 "$PGDATA"
+    fi
+    exec postgres -c hot_standby=on -c primary_slot_name=standby1
+---
+{{- range $role := list "primary" "standby" }}
+{{- if or (eq $role "primary") $.Values.db.standby.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: pg-{{ $role }}
+  labels: {{- include "cdl.labels" $ | nindent 4 }}
+spec:
+  selector: { app: pg-{{ $role }} }
+  ports: [{ name: pg, port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pg-{{ $role }}
+  labels: {{- include "cdl.labels" $ | nindent 4 }}
+spec:
+  serviceName: pg-{{ $role }}
+  replicas: 1
+  selector: { matchLabels: { app: pg-{{ $role }} } }
+  template:
+    metadata:
+      labels: { app: pg-{{ $role }}, app.kubernetes.io/part-of: cafedelyon }
+    spec:
+      securityContext: { fsGroup: 999 }
+      {{- if eq $role "standby" }}
+      affinity:   # primary 와 다른 노드 선호
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app: pg-primary } }
+      {{- end }}
+      containers:
+        - name: postgres
+          image: {{ $.Values.db.image }}
+          {{- if eq $role "primary" }}
+          args: ["-c", "wal_level=replica", "-c", "max_wal_senders=5", "-c", "max_replication_slots=5", "-c", "wal_keep_size=512MB"]
+          {{- else }}
+          command: ["bash", "/scripts/standby.sh"]
+          securityContext: { runAsUser: 999, runAsGroup: 999 }
+          {{- end }}
+          env:
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $.Values.db.existingSecret }}, key: postgres-password } }
+            - name: REPLICATION_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $.Values.db.existingSecret }}, key: replication-password } }
+          ports: [{ containerPort: 5432, name: pg }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"] }
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"] }
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources: {{- toYaml $.Values.db.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: scripts, mountPath: /scripts }
+            {{- if eq $role "primary" }}
+            - { name: scripts, mountPath: /docker-entrypoint-initdb.d/10-init.sh, subPath: 10-init.sh }
+            {{- end }}
+      volumes:
+        - name: scripts
+          configMap: { name: pg-scripts, defaultMode: 0755 }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: {{ $.Values.db.storageClass }}
+        resources: { requests: { storage: {{ $.Values.db.size }} } }
+---
+{{- end }}
+{{- end }}
