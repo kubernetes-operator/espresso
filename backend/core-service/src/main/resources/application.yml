@@ -1,0 +1,18 @@
+server:
+  port: 8082
+spring:
+  application.name: core-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/core_db}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/migration
+  servlet.multipart.max-file-size: 10MB
+app:
+  jwks-uri: ${JWKS_URI:http://localhost:8081/.well-known/jwks.json}
+  auth-url: ${AUTH_URL:http://localhost:8081}
+  settlement-url: ${SETTLEMENT_URL:http://localhost:8083}
+  upload-dir: ${UPLOAD_DIR:/tmp/espresso-uploads}
+  demo.seed: ${DEMO_SEED:true}
+management.endpoints.web.exposure.include: health,info

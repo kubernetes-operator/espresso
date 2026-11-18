@@ -1,0 +1,8 @@
+processResources {
+    from("${rootDir}/../db/core") { into 'db/migration' }
+}
+bootJar { archiveFileName = 'core-service.jar' }
+
+dependencies {
+    implementation 'org.apache.poi:poi-ooxml:5.3.0'   // 매출 엑셀 업로드
+}

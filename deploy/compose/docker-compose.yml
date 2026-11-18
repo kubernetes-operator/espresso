@@ -1,0 +1,83 @@
+# Espresso 로컬/랩 데모 구성 (설계 §4.3 소형 구성)
+#  - PostgreSQL primary + streaming standby (2중화)
+#  - auth / core / settlement 3개 서비스 + nginx(웹·게이트웨이)
+# 사용: ../build.sh && docker compose up -d   → http://<host>:8080
+name: espresso
+
+x-svc: &svc
+  restart: unless-stopped
+  depends_on:
+    pg-primary: { condition: service_healthy }
+
+services:
+  pg-primary:
+    image: postgres:16
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust      # 로컬 데모 전용. 랩/운영은 Secret 기반 계정 사용
+    command: >
+      postgres -c wal_level=replica -c max_wal_senders=5 -c max_replication_slots=5
+               -c hot_standby=on -c wal_keep_size=256MB
+    volumes:
+      - pg-primary:/var/lib/postgresql/data
+      - ./pg/primary-init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d settlement_db"]
+      interval: 3s
+      retries: 30
+    restart: unless-stopped
+
+  pg-standby:
+    image: postgres:16
+    user: postgres
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    entrypoint: ["/standby-entrypoint.sh"]
+    volumes:
+      - pg-standby:/var/lib/postgresql/data
+      - ./pg/standby-entrypoint.sh:/standby-entrypoint.sh:ro
+    depends_on:
+      pg-primary: { condition: service_healthy }
+    restart: unless-stopped
+
+  auth:
+    <<: *svc
+    build: { context: ../../backend/auth-service/build/libs, dockerfile: ../../../../deploy/compose/Dockerfile.service, args: { JAR: auth-service.jar } }
+    environment:
+      DB_URL: jdbc:postgresql://pg-primary:5432/auth_db
+      DEMO_SEED: "true"
+      DEMO_SHOW_ACCOUNTS: "true"
+
+  core:
+    <<: *svc
+    build: { context: ../../backend/core-service/build/libs, dockerfile: ../../../../deploy/compose/Dockerfile.service, args: { JAR: core-service.jar } }
+    environment:
+      DB_URL: jdbc:postgresql://pg-primary:5432/core_db
+      JWKS_URI: http://auth:8081/.well-known/jwks.json
+      AUTH_URL: http://auth:8081
+      SETTLEMENT_URL: http://settlement:8083
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+
+  settlement:
+    <<: *svc
+    build: { context: ../../backend/settlement-service/build/libs, dockerfile: ../../../../deploy/compose/Dockerfile.service, args: { JAR: settlement-service.jar } }
+    environment:
+      DB_URL: jdbc:postgresql://pg-primary:5432/settlement_db
+      JWKS_URI: http://auth:8081/.well-known/jwks.json
+      AUTH_URL: http://auth:8081
+      CORE_URL: http://core:8082
+
+  web:
+    image: nginx:1.27-alpine
+    ports: ["${WEB_PORT:-18080}:8080"]
+    volumes:
+      - ../../web/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on: [auth, core, settlement]
+    restart: unless-stopped
+
+volumes:
+  pg-primary:
+  pg-standby:
+  uploads:

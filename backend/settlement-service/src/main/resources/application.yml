@@ -1,0 +1,16 @@
+server:
+  port: 8083
+spring:
+  application.name: settlement-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/settlement_db}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/migration
+app:
+  jwks-uri: ${JWKS_URI:http://localhost:8081/.well-known/jwks.json}
+  auth-url: ${AUTH_URL:http://localhost:8081}
+  core-url: ${CORE_URL:http://localhost:8082}
+  demo.seed: ${DEMO_SEED:true}
+management.endpoints.web.exposure.include: health,info

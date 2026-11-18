@@ -1,0 +1,4 @@
+processResources {
+    from("${rootDir}/../db/settlement") { into 'db/migration' }
+}
+bootJar { archiveFileName = 'settlement-service.jar' }
