@@ -2,6 +2,7 @@
 
 웹: `http://<서버>:18080` · 로그인 화면의 계정 버튼을 누르면 바로 로그인됩니다. 비밀번호는 모두 `demo1234`이며 데모 전용입니다.
 자동 점검: `python3 tests/smoke_test.py` (61개 항목) · DB 2중화 확인: `bash tests/check_replication.sh`
+새로 띄운 직후라면 먼저 `python3 tests/wait_ready.py`로 데모 데이터 준비를 기다리세요. GitHub에서는 PR·푸시마다 자동 실행됩니다(Actions › smoke-test).
 
 화면 크기를 바꿔 보세요: 노트북(1280px 이상) 사이드 메뉴 / 태블릿(768~1279px) 아이콘 메뉴 / 모바일(767px 이하) 하단 탭.
 

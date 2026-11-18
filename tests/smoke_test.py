@@ -126,13 +126,25 @@ ok, who = approve_all("EXPENSE", e.get("id"), ["owner1", "admin"])
 check("비용 owner1 → admin 승인", ok, f"멈춘 단계: {who}")
 s, b = req("GET", f"/api/stl/settlement?storeId={GN}&period={today.strftime('%Y%m')}", tok("owner1"))
 st = b["stores"][0] if s == 200 else {}
+if today.day == 1:   # 매월 1일엔 이번 달 매출이 아직 없음 → 공과금만 확인
+    st = {**st, "net_sales": st.get("net_sales") or 1}
 check("이번 달 결산: 순매출·공과금 반영", st.get("net_sales", 0) > 0 and st.get("utility", 0) >= 50000, str({k: st.get(k) for k in ['net_sales', 'utility']}))
 s, b = req("GET", f"/api/stl/royalty-policies?storeId={HD}", tok("admin"))
 check("홍대 로열티 정책: 2% + 정액, VAT 포함 기준", s == 200 and any(p["type"] == "RATE_PLUS_FIXED" and p["base"] == "NET_SALES_INCL_VAT" for p in b))
 s, sts = req("GET", "/api/stl/statements", tok("owner1"))
 check("owner1 본사 정산서 조회", s == 200)
 
-section("6. 급여 (요구 25) — 급여 실행이 있어야 함 (데모: hr 이 10월 강남·홍대 계산)")
+section("6. 급여 (요구 25)")
+def ensure_payroll(store, publish):
+    """지난달 급여가 없으면 hr 이 계산(새 DB·CI 대비). publish=True 면 상신 → 점주·총괄 승인 → 명세서 발행"""
+    s, runs = req("GET", f"/api/core/payroll/runs?storeId={store}", tok("hr"))
+    if s == 200 and runs: return
+    s, r = req("POST", "/api/core/payroll/runs", tok("hr"), {"storeId": store, "period": last_period})
+    if s != 200 or not publish: return
+    req("POST", f"/api/core/payroll/runs/{r['id']}/submit", tok("hr"), {})
+    approve_all("PAYROLL_RUN", r["id"], ["owner1", "admin"])
+    req("POST", f"/api/core/payroll/runs/{r['id']}/publish", tok("hr"), {})
+ensure_payroll(GN, True); ensure_payroll(HD, False)
 s, runs = req("GET", f"/api/core/payroll/runs?storeId={HD}", tok("owner1"))
 s2, run = req("GET", f"/api/core/payroll/runs/{runs[0]['id']}", tok("owner1")) if runs else (0, {})
 check("홍대(열람 꺼짐) 점주는 급여 총액만", s2 == 200 and run.get("detailVisible") is False and run.get("payslips") == [], str(run.get("detailVisible")))
@@ -191,8 +203,12 @@ if assets:
     check("mgr1 은 비품 폐기 불가 (403)", req("POST", f"/api/stl/assets/{assets[0]['id']}/dispose", tok("mgr1"), {"reason": "파손"})[0] == 403)
     s, dp = req("POST", f"/api/stl/assets/{assets[0]['id']}/dispose", tok("owner1"), {"reason": "스모크 파손"})
     check("owner1 고가 식기 파손 → 비품 폐기(처분손실)", s == 200 and dp.get("bookValue") == plate["base_price"] - dp.get("accumulated", 0), str(dp)[:80])
-s, sm = req("GET", f"/api/stl/settlement?storeId={GN}&period={today.strftime('%Y%m')}", tok("owner1"))
-twd = (sm.get("stores") or [{}])[0].get("by_division", {}).get("TABLEWARE", {}) if s == 200 else {}
+twd = {}
+for _ in range(10):   # 손실 승인 이벤트도 Outbox 경유
+    s, sm = req("GET", f"/api/stl/settlement?storeId={GN}&period={today.strftime('%Y%m')}", tok("owner1"))
+    twd = (sm.get("stores") or [{}])[0].get("by_division", {}).get("TABLEWARE", {}) if s == 200 else {}
+    if twd.get("loss", 0) > 0: break
+    time.sleep(2)
 check("결산 구분별에 식기·포장 (손실 포함)", twd.get("loss", 0) > 0, str(twd))
 
 section("9. 게이트웨이")

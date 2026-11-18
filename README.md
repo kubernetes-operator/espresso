@@ -13,6 +13,7 @@ cd deploy/compose && docker compose up -d --build # PostgreSQL primary+standby, 
 
 - 데모 계정 비밀번호는 모두 `demo1234` (데모 전용, `DEMO_SEED=false` 로 끄기). 계정·시나리오: [docs/TEST-SCENARIOS.md](docs/TEST-SCENARIOS.md)
 - 점검: `python3 tests/smoke_test.py` (계정별 권한·업무 흐름·식기·포장 61항목), `bash tests/check_replication.sh` (DB 2중화)
+- CI: GitHub Actions `.github/workflows/smoke-test.yml` — PR·main·develop·feature/** 푸시마다 새 DB로 전체 구성을 띄워 위 두 점검을 실행 (`tests/wait_ready.py`로 기동·시드 대기, 실패 시 서비스 로그 출력)
 - 계정 서비스는 기동할 때 토큰 서명 키를 메모리에 새로 만듭니다 → 재시작하면 다시 로그인. 운영에서는 KMS/Secret 키로 교체.
 
 ## 구성
