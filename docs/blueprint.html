@@ -1,0 +1,344 @@
+<title>Espresso 설계도</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: 상단 탭 내비 + 섹션별 단일 컬럼, 태블릿·노트북 기준 최대 1180px */
+:root{
+  --bg:#f6f4f1; --surface:#ffffff; --fg:#2a211b; --muted:#6f625a; --line:#e3ddd6;
+  --accent:#8a4b24; --accent-soft:#f3e6db; --hq:#2f5d7c; --hq-soft:#e3edf4; --store:#4f7a3a; --store-soft:#e6f0df; --ext:#7a5a9a; --ext-soft:#eee6f5;
+  --warn:#a86a10;
+  --font-body:"IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#191513; --surface:#221d1a; --fg:#efe8e2; --muted:#ab9d93; --line:#3a322d;
+  --accent:#e0a074; --accent-soft:#3a2a1f; --hq:#8fbbd8; --hq-soft:#1f2c35; --store:#a3cf8a; --store-soft:#232e1d; --ext:#c6a8e3; --ext-soft:#2c2336; --warn:#e5b25a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#191513; --surface:#221d1a; --fg:#efe8e2; --muted:#ab9d93; --line:#3a322d;
+  --accent:#e0a074; --accent-soft:#3a2a1f; --hq:#8fbbd8; --hq-soft:#1f2c35; --store:#a3cf8a; --store-soft:#232e1d; --ext:#c6a8e3; --ext-soft:#2c2336; --warn:#e5b25a; color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.6}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:24px 64px}
+header.top{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;margin-bottom:16px}
+h1{font-size:26px;margin:0;letter-spacing:-.01em}
+.ver{font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+nav.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;gap:4px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:24px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+nav.tabs a{white-space:nowrap;padding:10px 14px;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;font-weight:500}
+nav.tabs a:hover{color:var(--fg);border-bottom-color:var(--accent)}
+nav.tabs a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+section{display:grid;gap:20px;scroll-margin-top:56px;padding-bottom:40px;border-bottom:1px solid var(--line);margin-bottom:32px}
+html{scroll-behavior:smooth}
+h2{font-size:20px;margin:0;text-wrap:balance}
+h3{font-size:16px;margin:0 0 8px}
+p.lead{margin:0;color:var(--muted);max-width:70ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;min-width:0}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.scroll{overflow-x:auto}
+pre.mermaid{margin:0;background:transparent;text-align:center}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{font-weight:600;color:var(--muted);font-size:12px;letter-spacing:.04em}
+td.c{text-align:center}
+code,.mono{font-family:var(--font-mono);font-size:13px}
+.chip{display:inline-block;padding:1px 8px;border-radius:999px;font-size:12px;font-weight:600}
+.chip.hq{background:var(--hq-soft);color:var(--hq)} .chip.store{background:var(--store-soft);color:var(--store)} .chip.ext{background:var(--ext-soft);color:var(--ext)} .chip.off{background:var(--line);color:var(--muted)}
+/* 조직도 */
+.org{display:grid;gap:18px;justify-items:center}
+.org .row{display:flex;flex-wrap:wrap;justify-content:center;gap:14px}
+.node{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 14px;min-width:150px;text-align:center}
+.node b{display:block;font-size:15px}
+.node small{color:var(--muted);font-size:12px}
+.node.hq{border-top:3px solid var(--hq)} .node.store{border-top:3px solid var(--store)} .node.ext{border-top:3px solid var(--ext)} .node.top{border-top:3px solid var(--accent)}
+.node.off{opacity:.6;border-style:dashed}
+.lines{display:grid;grid-template-columns:1fr 1fr;gap:18px;width:100%}
+.branch{display:grid;gap:12px;justify-items:center;padding:14px;border-radius:12px}
+.branch.hq{background:var(--hq-soft)} .branch.store{background:var(--store-soft)}
+.branch h4{margin:0;font-size:13px;letter-spacing:.06em;color:var(--muted)}
+.arrow{color:var(--muted);font-size:14px;line-height:1}
+.stores{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;width:100%}
+.store-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px}
+.store-card ul{margin:6px 0 0;padding-left:18px}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font-size:13px;color:var(--muted)}
+ul.tight{margin:0;padding-left:18px}
+@media (max-width:720px){.lines{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style>
+
+<div class="wrap">
+<header class="top">
+  <h1>Espresso 설계도</h1>
+  <span class="ver">설계서 v0.4 · 2026-11-18 · 커피숍 물류·회계 통합 시스템</span>
+</header>
+
+<nav class="tabs" aria-label="설계도 섹션">
+  <a href="#org">조직 구성도</a>
+  <a href="#arch">시스템 구성</a>
+  <a href="#flow">업무 흐름</a>
+  <a href="#perm">권한</a>
+  <a href="#money">금액·결산</a>
+  <a href="#data">데이터</a>
+  <a href="#plan">구현 현황</a>
+</nav>
+
+<!-- 조직 구성도 -->
+<section id="org">
+  <h2>조직 구성도</h2>
+  <p class="lead">본사 라인과 매장 라인은 총괄 관리자 아래에서 나뉩니다. 물류 관리자와 인적 관리자는 같은 단계이고, 점주는 매장 관리자보다 위에 있습니다. 투자자는 이 구조 밖에서 공개된 투자 정보만 봅니다.</p>
+  <div class="panel org">
+    <div class="node top"><b>총괄 관리자</b><small>HQ_ADMIN · 전 매장 · 최상위</small></div>
+    <div class="arrow">▼</div>
+    <div class="lines">
+      <div class="branch hq">
+        <h4>본사 라인</h4>
+        <div class="row">
+          <div class="node hq"><b>물류 관리자</b><small>담당 매장 물류 승인·발송·단가</small></div>
+          <div class="node hq"><b>인적 관리자</b><small>직원·근무·급여 계산·확정</small></div>
+          <div class="node hq off"><b>슈퍼바이저</b><small>권역 담당 · 정의만, 비활성</small></div>
+        </div>
+      </div>
+      <div class="branch store">
+        <h4>매장 라인</h4>
+        <div class="node store"><b>점주</b><small>자기 매장 전체 · 결재</small></div>
+        <div class="arrow">▼</div>
+        <div class="node store"><b>매장 관리자</b><small>매장 운영 · 결재 1단계</small></div>
+        <div class="arrow">▼</div>
+        <div class="node store"><b>일반 사원</b><small>요청 작성·수령·출퇴근</small></div>
+      </div>
+    </div>
+    <div class="node ext"><b>투자자</b><small>INVESTOR · 계층 밖 · 공개액만 조회</small></div>
+  </div>
+
+  <h3>데모 매장·계정 배치 (테스트용, 비밀번호 공통 <code>demo1234</code>)</h3>
+  <div class="stores">
+    <div class="store-card"><b>본사</b>
+      <ul class="tight"><li><code>admin</code> 총괄 관리자</li><li><code>logi</code> 물류 관리자 (전 매장)</li><li><code>hr</code> 인적 관리자 (전 매장)</li><li><code>sv</code> 슈퍼바이저 (비활성)</li></ul></div>
+    <div class="store-card"><b>강남점</b> <span class="chip store">서울 권역</span>
+      <ul class="tight"><li><code>owner1</code> 점주</li><li><code>mgr1</code> 매장 관리자</li><li><code>staff1</code> 일반 사원</li><li><code>investor1</code> 투자자 (공개)</li></ul></div>
+    <div class="store-card"><b>홍대점</b> <span class="chip store">서울 권역</span>
+      <ul class="tight"><li><code>owner1</code> 점주 (2개 매장 → 매장 선택)</li><li><code>mgr2</code> 매장 관리자</li><li><code>staff2</code> 일반 사원</li></ul></div>
+    <div class="store-card"><b>판교점</b> <span class="chip store">경기 권역</span>
+      <ul class="tight"><li><code>owner2</code> 점주</li><li><code>mgr3</code> 매장 관리자</li></ul></div>
+  </div>
+</section>
+
+<!-- 시스템 구성 -->
+<section id="arch">
+  <h2>시스템 구성</h2>
+  <p class="lead">지금은 3개 배포 단위로 가볍게 시작하고, 매장이 늘면 core 안의 모듈을 서비스로 떼어냅니다. 계정과 결산은 처음부터 별도 서비스·별도 DB입니다.</p>
+  <div class="panel scroll">
+<pre class="mermaid">
+flowchart LR
+  subgraph Client["사용자 화면"]
+    W["웹 · React<br/>노트북·태블릿 우선"]
+    M["앱 · React Native<br/>모바일 하단 탭"]
+  end
+  GW["Gateway<br/>JWT 검증 · 라우팅"]
+  W --> GW
+  M --> GW
+  subgraph Svc["서비스"]
+    A["auth-service<br/>계정·등급·조직"]
+    C["core-service<br/>매장·카탈로그·결재·물류<br/>재고·매출·인사급여·리포트"]
+    S["settlement-service<br/>분개·결산·로열티<br/>정산서·세무·투자"]
+  end
+  GW --> A
+  GW --> C
+  GW --> S
+  C -- "이벤트 (Outbox)" --> S
+  subgraph DB["PostgreSQL 2중화"]
+    DA[("auth_db<br/>primary + standby")]
+    DC[("core_db<br/>primary + standby")]
+    DS[("settlement_db<br/>primary + standby")]
+  end
+  A --> DA
+  C --> DC
+  S --> DS
+</pre>
+  </div>
+  <div class="grid2">
+    <div class="panel"><h3>확장 단계</h3>
+      <table><thead><tr><th>매장 수</th><th>구성</th></tr></thead><tbody>
+        <tr><td class="mono">~50</td><td>auth / core / settlement 3개, Outbox 폴링</td></tr>
+        <tr><td class="mono">~300</td><td>물류·재고·리포트 분리, Kafka 도입</td></tr>
+        <tr><td class="mono">~1,000</td><td>전 서비스 분리, 읽기 복제본, 월 파티션, 결산 배치 워커</td></tr>
+      </tbody></table></div>
+    <div class="panel"><h3>Kubernetes 배치</h3>
+      <ul class="tight">
+        <li>Ingress + cert-manager → gateway</li>
+        <li>CloudNativePG: DB마다 primary 1 + 동기 standby 1</li>
+        <li>MinIO/S3: 첨부·PDF·백업(WAL)</li>
+        <li>Prometheus·Grafana·Loki, Helm + Argo CD</li>
+      </ul></div>
+  </div>
+</section>
+
+<!-- 업무 흐름 -->
+<section id="flow">
+  <h2>업무 흐름</h2>
+  <p class="lead">모든 문서는 요청·승인·완료 시각과 처리자를 이력으로 남깁니다. 결재는 기본적으로 금액과 상관없이 전체 결재선을 거치고, 총괄 관리자가 매장·금액별로 줄이거나 승인자를 지정할 수 있습니다.</p>
+  <div class="panel scroll"><h3>물류 요청</h3>
+<pre class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> 작성중
+  작성중 --> 요청: 상신
+  요청 --> 매장승인: 매장관리자·점주
+  매장승인 --> 물류승인: 물류관리자 (단가 확정)
+  물류승인 --> 구매완료: 외부 구매
+  물류승인 --> 준비중: 본사 물류
+  구매완료 --> 준비중
+  준비중 --> 발송: 송장 등록
+  발송 --> 도착
+  도착 --> 수령: 매장 검수
+  도착 --> 부분수령: 수량 부족
+  부분수령 --> 수령: 부족분 → 결손 초안
+  수령 --> 완료
+  요청 --> 반려
+  매장승인 --> 반려
+  완료 --> [*]
+</pre></div>
+  <div class="grid2">
+    <div class="panel scroll"><h3>결손·손실·내부사용</h3>
+<pre class="mermaid">
+sequenceDiagram
+  participant 앱 as 사원/매장관리자 (앱)
+  participant M as 매장관리자
+  participant O as 점주
+  participant H as 총괄
+  participant ST as 결산
+  앱->>M: 등록 (사유: 시음·직원음료·파손…, 사진)
+  M->>O: 승인
+  O->>H: 승인
+  H-->>앱: 최종 승인 → 재고 차감
+  H-->>ST: 감모·폐기 분개
+</pre></div>
+    <div class="panel"><h3>기본 결재선</h3>
+      <table><thead><tr><th>문서</th><th>결재 순서</th></tr></thead><tbody>
+        <tr><td>물류 요청</td><td>매장관리자 → 점주 → 물류관리자 → 총괄</td></tr>
+        <tr><td>손실·결손·내부사용</td><td>매장관리자 → 점주 → 총괄</td></tr>
+        <tr><td>급여 확정</td><td>인적관리자 → 점주 → 총괄</td></tr>
+        <tr><td>비용</td><td>매장관리자 → 점주 → 총괄</td></tr>
+      </tbody></table>
+      <p class="lead" style="margin-top:10px">요청자 본인 단계는 자동으로 넘어갑니다. 반려할 때는 사유가 필수입니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 권한 -->
+<section id="perm">
+  <h2>권한</h2>
+  <p class="lead">등급과 담당 매장을 함께 확인합니다. 매장이 2개 이상 배정된 계정은 상단에서 매장을 고르거나 합산으로 봅니다.</p>
+  <div class="panel scroll">
+    <table>
+      <thead><tr><th>기능</th><th>총괄</th><th>물류</th><th>인적</th><th>점주</th><th>매장관리자</th><th>사원</th><th>투자자</th></tr></thead>
+      <tbody>
+        <tr><td>매장 생성·설정·로열티</td><td class="c">●</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>물류 요청 작성</td><td class="c">●</td><td class="c">●</td><td></td><td class="c">●</td><td class="c">●</td><td class="c">●</td><td></td></tr>
+        <tr><td>물류 승인·발송</td><td class="c">●</td><td class="c">●</td><td></td><td></td><td></td><td></td><td></td></tr>
+        <tr><td>수령 검수</td><td class="c">●</td><td></td><td></td><td class="c">●</td><td class="c">●</td><td class="c">●</td><td></td></tr>
+        <tr><td>결손 등록 / 승인</td><td class="c">● / ●</td><td class="c">●(배송) / </td><td></td><td class="c">● / ●</td><td class="c">● / ●</td><td class="c">● / </td><td></td></tr>
+        <tr><td>매출·비용 입력</td><td class="c">●</td><td></td><td></td><td class="c">●</td><td class="c">●</td><td></td><td></td></tr>
+        <tr><td>급여 계산·확정</td><td class="c">●</td><td></td><td class="c">●</td><td class="c">결재</td><td></td><td></td><td></td></tr>
+        <tr><td>개인별 급여 조회</td><td class="c">●</td><td></td><td class="c">●</td><td class="c">설정 시 / 총액</td><td class="c">본인</td><td class="c">본인</td><td></td></tr>
+        <tr><td>결산·정산서</td><td class="c">●</td><td></td><td></td><td class="c">●</td><td class="c">요약</td><td></td><td></td></tr>
+        <tr><td>투자금</td><td class="c">전용</td><td></td><td></td><td></td><td></td><td></td><td class="c">공개액</td></tr>
+        <tr><td>매장 비교</td><td class="c">●</td><td class="c">물류 지표</td><td class="c">인건비 지표</td><td class="c">자기 매장끼리</td><td></td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 금액·결산 -->
+<section id="money">
+  <h2>금액·결산</h2>
+  <div class="grid2">
+    <div class="panel"><h3>가격과 부가세</h3>
+      <ul class="tight">
+        <li>적용 단가 = 매장별 단가(없으면 본사 기준가) − 매장별 할인</li>
+        <li>요청 시점의 단가·할인·세액을 문서에 고정 저장</li>
+        <li>세액 = 공급가 × 10% (라인별, 원 단위 절사)</li>
+        <li>면세 품목은 세액란에 <code>0 (면세)</code></li>
+        <li>표시: 계정 지정값 → 없으면 매장 기본값 (별도/포함)</li>
+      </ul></div>
+    <div class="panel"><h3>결산 (판매 수익 기준, 월)</h3>
+      <table><tbody>
+        <tr><td>순매출</td><td class="mono">총매출 − 할인 − 환불 (VAT 제외)</td></tr>
+        <tr><td>매출원가</td><td class="mono">기초재고 + 매입 − 기말재고</td></tr>
+        <tr><td>판관비</td><td class="mono">인건비 + 임대 + 공과금 + 내부사용 + 운영비 + 손실·결손 + 감가상각</td></tr>
+        <tr><td>영업이익</td><td class="mono">순매출 − 매출원가 − 판관비</td></tr>
+        <tr><td><b>결산액</b></td><td class="mono"><b>영업이익 − 로열티 ± 영업외</b></td></tr>
+      </tbody></table></div>
+    <div class="panel"><h3>로열티·본사 정산서</h3>
+      <ul class="tight">
+        <li>매장별 정책: 매출 %, 정액, 혼합, 구간</li>
+        <li>기준 기본값 VAT 제외 순매출, VAT 포함으로 변경 가능</li>
+        <li>월 정산서 = 로열티 + 본사가 대신 결제한 외부 구매액</li>
+        <li>입금: 매장이 등록 → 본사 확인 (부분·완납·연체)</li>
+      </ul></div>
+    <div class="panel"><h3>사용·결손 구분</h3>
+      <ul class="tight">
+        <li><b>내부사용</b>: 포장·일회용품·위생·사무용품 소진 → 소모품비</li>
+        <li><b>식기</b>: 파손 시 손실(사유 '식기 파손'), 기준 단가(기본 10만원) 이상 고가 식기는 비품 → 감가상각, 파손 시 비품 폐기(처분손실)</li>
+        <li><b>공과금</b>: 전기·수도·가스·통신 → 수도광열비·통신비</li>
+        <li><b>결손</b>: 실사 차이, 배송 부족, 시음, 샘플, 직원 음료</li>
+        <li><b>손실</b>: 유통기한, 파손, 품질 불량</li>
+      </ul></div>
+  </div>
+</section>
+
+<!-- 데이터 -->
+<section id="data">
+  <h2>데이터</h2>
+  <p class="lead">DB는 3개이고 각각 primary와 동기 standby로 2중화합니다. DB끼리는 ID 값으로만 참조하고, 결산 DB는 다른 서비스가 보낸 이벤트로만 채워집니다.</p>
+  <div class="panel scroll">
+    <table><thead><tr><th>DB</th><th>스키마</th><th>주요 테이블</th></tr></thead><tbody>
+      <tr><td class="mono">auth_db</td><td class="mono">auth</td><td>role, app_user, user_role_assignment, audit_log</td></tr>
+      <tr><td class="mono">core_db</td><td class="mono">store · catalog</td><td>region, store, store_lease, category(23), item, store_price</td></tr>
+      <tr><td></td><td class="mono">approval</td><td>line_template, request, step, delegation</td></tr>
+      <tr><td></td><td class="mono">logistics · inventory</td><td>request, request_line, shipment, stock_balance, stock_ledger, stock_adjustment</td></tr>
+      <tr><td></td><td class="mono">sales · hr · report</td><td>daily_sales, employee, work_record, payroll_run, payslip, report_snapshot</td></tr>
+      <tr><td class="mono">settlement_db</td><td class="mono">stl</td><td>account_subject(52), journal_entry/line, expense, royalty_policy, hq_statement, tax_invoice, investment_item, investor_disclosure</td></tr>
+    </tbody></table>
+  </div>
+  <div class="panel"><h3>물류 카테고리 (음료 / 디저트 / 식기·포장 / 관리)</h3>
+    <div class="legend">
+      <span><span class="chip store">음료</span> 커피(원두) · 유제품 · 시럽·소스·파우더 · 차·음료 베이스 · 커피 용품</span>
+      <span><span class="chip ext">디저트</span> 디저트 · 과자 · 베이킹 재료 · 베이킹 용품</span>
+      <span><span class="chip off">식기·포장</span> 식기(머그·글라스·접시·커트러리) · 포장(테이크아웃 백·캐리어·디저트 박스) · 일회용품(컵·뚜껑·빨대·슬리브·냅킨·스푼·포크)</span>
+      <span><span class="chip hq">관리</span> 위생·청소 · 사무 · 전산 · 통신 · 기타 · <b>설비</b>(가구 · 냉장고 · 냉동고 · 커피머신 · 제빙기 · 주방기기)</span>
+    </div>
+  </div>
+</section>
+
+<!-- 구현 계획 -->
+<section id="plan">
+  <h2>구현 현황</h2>
+  <p class="lead">1~11단계를 모두 구현했고, 계정별 권한과 업무 흐름 자동 점검 61개 항목이 통과했습니다(식기·포장 구분 포함). 테스트 환경은 docker-compose 소형 구성(포트 18080)입니다. 계정별 확인 순서는 저장소 docs/TEST-SCENARIOS.md 에 있습니다.</p>
+  <div class="panel scroll">
+    <table><thead><tr><th>단계</th><th>내용</th><th>확인 계정</th></tr></thead><tbody>
+      <tr><td class="mono">완료</td><td colspan="2">아래 전 단계 구현·검증 완료 (2026-11-18)</td></tr>
+      <tr><td class="mono">1</td><td>설계도·조직도 (이 페이지, 앱 안에도 포함)</td><td>전체</td></tr>
+      <tr><td class="mono">2</td><td>저장소 골격, docker-compose, DB 2중화</td><td>—</td></tr>
+      <tr><td class="mono">3</td><td>로그인·등급·담당 매장·조직도 화면</td><td>전체</td></tr>
+      <tr><td class="mono">4–5</td><td>매장·품목·매장별 단가·VAT, 결재 엔진, 물류 요청→발송→수령</td><td>mgr1 → owner1 → logi → admin</td></tr>
+      <tr><td class="mono">6</td><td>재고, 손실·결손·내부사용, 실사</td><td>staff1, mgr1, owner1</td></tr>
+      <tr><td class="mono">7</td><td>매출·비용, 월 결산, 로열티, 정산서·입금 확인</td><td>owner1, admin</td></tr>
+      <tr><td class="mono">8</td><td>직원·근무·급여 자동 계산·명세서</td><td>hr, owner1, staff1</td></tr>
+      <tr><td class="mono">9</td><td>등급별 1장 리포트, 매장 비교, 투자·투자자</td><td>admin, logi, investor1</td></tr>
+      <tr><td class="mono">10–11</td><td>매장 생성 마법사, 설정, 계정별 테스트 시나리오</td><td>admin</td></tr>
+      <tr><td class="mono">12</td><td>식기·포장 구분: 카테고리·매출 입력·결산 구분별, 식기 파손 손실, 고가 식기 비품·폐기</td><td>mgr1, staff1, owner1, admin</td></tr>
+    </tbody></table>
+  </div>
+  <div class="panel scroll"><h3>아직 남은 것 (설계 대비)</h3>
+    <table><tbody>
+      <tr><td>모바일 앱 (React Native)</td><td>미구현 · 반응형 웹 하단 탭으로 확인</td></tr>
+      <tr><td>Kubernetes 배포 (Helm · CloudNativePG · Kafka)</td><td>미구현 · 현재 docker-compose, DB 복제는 비동기</td></tr>
+      <tr><td>전자세금계산서 발행 대행사 연동</td><td>대행사 선정 필요 · 지금은 대기열 + 승인번호 입력</td></tr>
+      <tr><td>급여 요율 · 간이세액표</td><td>데모 값 · 운영 전 고시값 등록 필요</td></tr>
+      <tr><td>레시피 재고 차감 · POS 연동 · 매장 간 이동</td><td>4차 범위</td></tr>
+    </tbody></table>
+  </div>
+</section>
+</div>
+
+

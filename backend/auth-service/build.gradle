@@ -1,0 +1,4 @@
+processResources {
+    from("${rootDir}/../db/auth") { into 'db/migration' }
+}
+bootJar { archiveFileName = 'auth-service.jar' }

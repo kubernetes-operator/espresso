@@ -1,0 +1,2 @@
+rootProject.name = 'espresso'
+include 'common', 'auth-service', 'core-service', 'settlement-service'

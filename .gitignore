@@ -1,0 +1,23 @@
+# 빌드 산출물·캐시
+.cache/
+**/build/
+**/.gradle/
+web/node_modules/
+web/dist/
+*.log
+
+# 로컬 도구 설정
+.claude/
+.idea/
+.vscode/
+
+# 자격 증명·민감 정보 (절대 커밋 금지)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+*kubeconfig*
+secrets/
+*.tsbuildinfo
