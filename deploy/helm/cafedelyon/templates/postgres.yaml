@@ -30,6 +30,7 @@ data:
       pg_basebackup -h pg-primary -U replicator -D "$PGDATA" -X stream -S standby1 -R -P
       chmod 700 "$PGDATA"
     fi
+    chmod 700 "$PGDATA"   # fsGroup 이 그룹 권한을 더해도 PostgreSQL 이 요구하는 0700 유지
     exec postgres -c hot_standby=on -c primary_slot_name=standby1
 ---
 {{- range $role := list "primary" "standby" }}
@@ -56,7 +57,7 @@ spec:
     metadata:
       labels: { app: pg-{{ $role }}, app.kubernetes.io/part-of: cafedelyon }
     spec:
-      securityContext: { fsGroup: 999 }
+      securityContext: { fsGroup: 999, fsGroupChangePolicy: OnRootMismatch }
       {{- if eq $role "standby" }}
       affinity:   # primary 와 다른 노드 선호
         podAntiAffinity:
