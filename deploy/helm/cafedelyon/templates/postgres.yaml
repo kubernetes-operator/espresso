@@ -24,6 +24,8 @@ data:
     export PGPASSFILE=/tmp/.pgpass
     echo "pg-primary:5432:*:replicator:${REPLICATION_PASSWORD}" > "$PGPASSFILE"; chmod 600 "$PGPASSFILE"
     if [ ! -s "$PGDATA/PG_VERSION" ]; then
+      # 이전 base backup 이 중간에 끊겨 남은 불완전한 데이터는 지우고 다시 받음 (standby 볼륨만 해당)
+      if [ -d "$PGDATA" ] && [ -n "$(ls -A "$PGDATA" 2>/dev/null)" ]; then echo "incomplete standby data → reset"; rm -rf "${PGDATA:?}"/* "${PGDATA:?}"/.[!.]* 2>/dev/null || true; fi
       until pg_isready -h pg-primary -U postgres; do echo "waiting primary"; sleep 3; done
       pg_basebackup -h pg-primary -U replicator -D "$PGDATA" -X stream -S standby1 -R -P
       chmod 700 "$PGDATA"
@@ -80,13 +82,18 @@ spec:
             - name: REPLICATION_PASSWORD
               valueFrom: { secretKeyRef: { name: {{ $.Values.db.existingSecret }}, key: replication-password } }
           ports: [{ containerPort: 5432, name: pg }]
+          # 최초 initdb·base backup(NFS 에서 수 분)이 끝날 때까지 liveness 가 재시작하지 않도록 최대 30분 대기
+          startupProbe:
+            exec: { command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"] }
+            periodSeconds: 10
+            failureThreshold: 180
           readinessProbe:
             exec: { command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"] }
             periodSeconds: 5
           livenessProbe:
             exec: { command: ["pg_isready", "-U", "postgres", "-h", "127.0.0.1"] }
-            initialDelaySeconds: 60
             periodSeconds: 15
+            failureThreshold: 4
           resources: {{- toYaml $.Values.db.resources | nindent 12 }}
           volumeMounts:
             - { name: data, mountPath: /var/lib/postgresql/data }
