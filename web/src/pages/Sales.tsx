@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { api } from '../api'
+import { prepareUpload, fmtSize, UPLOAD_LIMIT } from '../upload'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast, Empty } from '../components/ui'
 import { useSession } from '../session'
 import { won } from '../format'
@@ -110,8 +111,8 @@ function UploadModal({ storeId, onClose, onDone }: any) {
   const [err, setErr] = useState<string | null>(null)
   const go = async () => {
     if (!file) return
-    const fd = new FormData(); fd.append('file', file)
-    try { const r: any = await api(`/api/core/sales/${storeId}/upload?close=${close}`, { body: fd }); setRes(r); if (!r.errors.length) onDone(`${r.applied}일 매출을 반영했습니다`) }
+    setErr(null)
+    try { const fd = new FormData(); fd.append('file', await prepareUpload(file)); const r: any = await api(`/api/core/sales/${storeId}/upload?close=${close}`, { body: fd }); setRes(r); if (!r.errors.length) onDone(`${r.applied}일 매출을 반영했습니다`) }
     catch (e: any) { setErr(e.message) }
   }
   const tpl = async () => {
@@ -121,7 +122,7 @@ function UploadModal({ storeId, onClose, onDone }: any) {
   return (
     <Modal title="매출 엑셀 업로드" onClose={onClose}>
       <div className="form">
-        <p className="small">열 순서: 일자, 음료, 디저트, 식기·포장, 기타, 면세, 할인, 환불, 카드, 현금, 기타결제, 고객수 (금액은 VAT 포함). .xlsx 또는 .csv · 머리글 행이 있으면 열 이름으로 읽습니다(식기·포장 열이 없는 예전 양식도 가능)</p>
+        <p className="small">열 순서: 일자, 음료, 디저트, 식기·포장, 기타, 면세, 할인, 환불, 카드, 현금, 기타결제, 고객수 (금액은 VAT 포함). .xlsx 또는 .csv · 머리글 행이 있으면 열 이름으로 읽습니다(식기·포장 열이 없는 예전 양식도 가능) · 파일당 최대 {fmtSize(UPLOAD_LIMIT)} (넘으면 기간을 나눠 올리기)</p>
         <button type="button" onClick={tpl}>양식 내려받기 (CSV)</button>
         <input id="up-file" type="file" accept=".xlsx,.xls,.csv" aria-label="파일" onChange={e => setFile(e.target.files?.[0] ?? null)} />
         <label className="switch"><input type="checkbox" checked={close} onChange={e => setClose(e.target.checked)} /><span>올리면서 바로 마감</span></label>

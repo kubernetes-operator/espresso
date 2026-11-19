@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { prepareUpload } from '../upload'
 import { dt, ROLE_NAMES } from '../format'
 import { useApi, Badge } from './ui'
 import { useNames } from './directory'
@@ -95,8 +96,11 @@ export function Comments({ docType, docId }: { docType: string; docId: string })
     try { await api(`/api/core/docs/${docType}/${docId}/comments`, { body: { body } }); setBody(''); list.reload() } catch (e: any) { setErr(e.message) }
   }
   const upload = async (f: File) => {
-    const fd = new FormData(); fd.append('file', f)
-    try { await api(`/api/core/docs/${docType}/${docId}/attachments`, { body: fd }); files.reload() } catch (e: any) { setErr(e.message) }
+    setErr(null)
+    try {
+      const fd = new FormData(); fd.append('file', await prepareUpload(f))
+      await api(`/api/core/docs/${docType}/${docId}/attachments`, { body: fd }); files.reload()
+    } catch (e: any) { setErr(e.message) }
   }
   const open = async (a: any) => {
     const res: Response = await api(`/api/core/docs/${docType}/${docId}/attachments/${a.id}`, { raw: true })
