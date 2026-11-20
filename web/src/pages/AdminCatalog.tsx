@@ -127,7 +127,7 @@ function ItemModal({ item, cats, onClose, onDone }: any) {
     <Modal title={isNew ? '품목 추가' : `품목 수정 · ${item.sku}`} onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
         <label htmlFor="it-cat">구분 · 카테고리</label>
-        <select id="it-cat" value={f.categoryId} onChange={e => pickCat(e.target.value)}>
+        <select id="it-cat" required value={f.categoryId} onChange={e => pickCat(e.target.value)}>
           <option value="">선택</option>
           {divisions.map((d: any) => <optgroup key={d} label={d}>{cats.filter((c: any) => c.division_name === d).map((c: any) =>
             <option key={c.id} value={c.id}>{c.name} ({c.sku_prefix}){c.is_asset ? ' · 설비' : ''}</option>)}</optgroup>)}
@@ -137,18 +137,18 @@ function ItemModal({ item, cats, onClose, onDone }: any) {
           <input id="it-sku" value={f.sku} placeholder={isNew ? '카테고리를 고르면 자동' : ''} onChange={e => { setAuto(false); setF({ ...f, sku: e.target.value.toUpperCase() }) }} />
           {isNew && f.categoryId && <button type="button" className="ghost small" onClick={() => { setAuto(true); pickCat(f.categoryId) }}>자동 코드 다시 받기</button>}
         </div>
-        <label htmlFor="it-name">품명</label><input id="it-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
+        <label htmlFor="it-name">품명</label><input id="it-name" required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
         <div className="row">
-          <div><label htmlFor="it-unit">단위</label><input id="it-unit" value={f.unit} onChange={e => setF({ ...f, unit: e.target.value })} /></div>
+          <div><label htmlFor="it-unit">단위</label><input id="it-unit" required value={f.unit} onChange={e => setF({ ...f, unit: e.target.value })} /></div>
           <div><label htmlFor="it-tax">과세</label><select id="it-tax" value={f.taxType} onChange={e => setF({ ...f, taxType: e.target.value })}><option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
         </div>
         <div className="row">
           <div><label htmlFor="it-cost">본사 매입가 (공급가)</label><input id="it-cost" inputMode="numeric" value={f.hqCost} placeholder="비공개 · 물류 관리자 이상" onChange={e => setF({ ...f, hqCost: e.target.value.replace(/\D/g, '') })} /></div>
-          <div><label htmlFor="it-price">본사 기준가 (매장 공급가)</label><input id="it-price" inputMode="numeric" value={f.basePrice} onChange={e => setF({ ...f, basePrice: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="it-price">본사 기준가 (매장 공급가)</label><input id="it-price" required inputMode="numeric" value={f.basePrice} onChange={e => setF({ ...f, basePrice: e.target.value.replace(/\D/g, '') })} /></div>
         </div>
         {!isNew && <label className="switch"><input type="checkbox" checked={f.isActive} onChange={e => setF({ ...f, isActive: e.target.checked })} /><span>요청 가능</span></label>}
         {err && <div className="error-box">{err}</div>}
-        <button className="primary" disabled={!f.categoryId || !f.name || !f.basePrice}>저장</button>
+        <button className="primary">저장</button>
       </form>
     </Modal>
   )

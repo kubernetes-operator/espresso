@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
+import { checkRequired } from '../components/enhance'
 import { useApi, Page, Badge, ErrorBox, Toast } from '../components/ui'
 import { useSession } from '../session'
 import { won } from '../format'
@@ -29,14 +30,14 @@ export function StoreWizardStart() {
       <section className="card form">
         <h2>새 매장 시작</h2>
         <div className="row">
-          <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
-          <div><label htmlFor="sw-name">매장명</label><input id="sw-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
-          <div><label htmlFor="sw-region">권역</label><select id="sw-region" value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+          <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" required value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
+          <div><label htmlFor="sw-name">매장명</label><input id="sw-name" required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
+          <div><label htmlFor="sw-region">권역</label><select id="sw-region" required value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
           <div><label htmlFor="sw-site">구분</label><select id="sw-site" value={f.siteType} onChange={e => setF({ ...f, siteType: e.target.value })}><option value="STORE">매장</option><option value="BAKERY">베이커리</option></select></div>
           <div><label htmlFor="sw-type">형태</label><select id="sw-type" value={f.businessType} onChange={e => setF({ ...f, businessType: e.target.value })}><option value="FRANCHISE">가맹</option><option value="DIRECT">직영</option></select></div>
         </div>
         {err && <div className="error-box">{err}</div>}
-        <button className="primary" disabled={!f.code || !f.name} onClick={start}>시작</button>
+        <button className="primary" onClick={e => { const b = (e.target as HTMLElement).closest('.card, .form, div'); if (b && checkRequired((b.parentElement ?? b) as HTMLElement).length) return; start() }}>시작</button>
       </section>
       {(list.data ?? []).length > 0 && <section className="card table-wrap"><h2>진행 이력</h2>
         <table className="tbl"><thead><tr><th>매장</th><th>단계</th><th>상태</th><th></th></tr></thead>

@@ -14,6 +14,8 @@ const GUIDE: Record<string, { text: string; to: string }[]> = {
     { text: '결재함: 물류·결손 최종 승인', to: '/approvals' },
     { text: '매장 비교, 매출 추이, 투자 관리', to: '/compare' },
     { text: '권역(시·도) 추가, 베이커리 생성', to: '/admin/stores' },
+    { text: '결산: 주 마감 · 본사 매출(상단 [본사])', to: '/settlement' },
+    { text: '투자자 지급액 결정', to: '/investor-payouts' },
   ],
   LOGISTICS_MGR: [
     { text: '물류 처리 보드: 승인 → 외부 구매 → 발송 등록', to: '/logistics/board' },
@@ -39,17 +41,21 @@ const GUIDE: Record<string, { text: string; to: string }[]> = {
     { text: '매출 입력, 비용 입력', to: '/sales' },
   ],
   STAFF: [
+    { text: '근무 마감: 판매·결제 금액 입력', to: '/closing' },
     { text: '물류 요청 작성 → 상신', to: '/logistics' },
     { text: '결손 등록 (시음·직원 음료)', to: '/adjustments' },
     { text: '내 근무·급여명세', to: '/my' },
   ],
   INVESTOR: [{ text: '공개된 투자 금액, 월별 매출액·이익 그래프', to: '/investor' }, { text: '투자 매장과 본사 조직도', to: '/org' }],
-  SUPERVISOR: [],
+  SUPERVISOR: [
+    { text: '담당 권역 물류 처리·추적 (물류 관리자 권한 포함)', to: '/logistics/tracking' },
+    { text: '담당 권역 직원·근무표·급여 (인사 관리자 권한 포함)', to: '/schedule' },
+  ],
 }
 
 export function Home() {
   const s = useSession()
-  const roles = [...s.roles]
+  const roles = [...s.baseRoles]
   return (
     <Page title={`${s.user?.name}님, 안녕하세요`} sub={roles.map(r => ROLE_NAMES[r]).join(' · ')}>
       {s.user?.initialPassword && <PasswordCard />}

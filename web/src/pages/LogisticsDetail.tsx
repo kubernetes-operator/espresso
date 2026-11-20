@@ -34,7 +34,8 @@ export function LogisticsDetail() {
   return (
     <Page title={`${r.request_no}`} sub={<>{r.store_name} · {r.title || '제목 없음'} · <Badge tone={LR_TONE[r.status]}>{LR_STATUS[r.status]}</Badge>{r.kind === 'RESEND' && <> <Badge tone="accent">재발송(무상)</Badge></>}</>}
       actions={<>
-        {isLogi && !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(r.status) && <button onClick={() => setDueOpen(true)}>처리 기한</button>}
+        {isLogi && !['COMPLETED', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(r.status) && <button onClick={() => setDueOpen(true)}>처리 기한</button>}
+        {isLogi && r.status === 'COMPLETED' && <button className="primary" onClick={() => run('close', {}, '확인 완료했습니다')}>확인 완료</button>}
         {r.status === 'DRAFT' && <button className="primary" onClick={() => run('submit', {}, '상신했습니다')}>상신</button>}
         {['DRAFT', 'REJECTED'].includes(r.status) && <button onClick={() => run('cancel', {}, '취소했습니다')}>요청 취소</button>}
         {isLogi && ['LOGISTICS_APPROVED', 'PURCHASED'].includes(r.status) && !extOpen.length && <button onClick={() => run('prepare', {}, '출고 준비로 바꿨습니다')}>출고 준비</button>}

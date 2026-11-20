@@ -57,15 +57,16 @@ export function Org() {
       <ErrorBox error={org.error || stores.error} />
       {view === 'roles' ? (
         <div className="org-roles card">
-          <div className="org-node top"><b>총괄 관리자</b><small>최상위 · 전 매장</small></div>
+          <div className="org-node top"><b>총괄 관리자</b><small>최상위 · 전 매장 · 물류·인사 권한 포함</small></div>
           <div className="org-arrow">▼</div>
           <div className="org-lines">
             <div className="org-branch hq">
               <div className="branch-label">본사 라인</div>
+              <div className="org-node hq"><b>슈퍼바이저</b><small>권역 담당 · 물류·인사 권한 포함</small></div>
+              <div className="org-arrow">▼</div>
               <div className="org-row">
                 <div className="org-node hq"><b>물류 관리자</b><small>물류 승인·발송·단가</small></div>
                 <div className="org-node hq"><b>인사 관리자</b><small>직원·근무·급여</small></div>
-                <div className="org-node hq off"><b>슈퍼바이저</b><small>권역 담당 · 비활성</small></div>
               </div>
             </div>
             <div className="org-branch store">
@@ -90,7 +91,7 @@ export function Org() {
                 {data.byRole('LOGISTICS_MGR').map(u => <Person key={u.id} u={u} me={me} note={data.scopeNote(u, 'LOGISTICS_MGR')} />)}</div>
               <div className="org-col"><div className="col-label">인사 관리자</div>
                 {data.byRole('HR_MGR').map(u => <Person key={u.id} u={u} me={me} note={data.scopeNote(u, 'HR_MGR')} />)}</div>
-              <div className="org-col"><div className="col-label">슈퍼바이저 <Badge>비활성</Badge></div>
+              <div className="org-col"><div className="col-label">슈퍼바이저</div>
                 {data.byRole('SUPERVISOR').map(u => <Person key={u.id} u={u} me={me} note={data.scopeNote(u, 'SUPERVISOR')} />)}</div>
             </div>
           </section>

@@ -39,6 +39,72 @@ public class InvestmentController {
         return v == null ? 0 : v;
     }
 
+    /** 이익금 배분 비율 = 이 투자자의 출자액 / 매장 구성 총액(투자자 출자 + 본사 지원). 출자 없으면 null */
+    BigDecimal shareOf(UUID investor, UUID store) {
+        long total = db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ?").param(store).query(Long.class).single();
+        long mine = db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ? and funding_source = 'INVESTOR' and investor_id = ?").params(store, investor).query(Long.class).single();
+        if (total == 0 || mine == 0) return null;
+        return BigDecimal.valueOf(mine).divide(BigDecimal.valueOf(total), 6, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 투자자 지급액 결정 (인사 메뉴): 월 결산액 × 출자 비율 = 계산액 → 총괄·인사 관리자가 지급액 결정 → 지급 완료
+     */
+    @GetMapping("/api/stl/investor-payouts")
+    public List<Map<String, Object>> payouts(@RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.HR_MGR);
+        Map<String, String> names = new HashMap<>();
+        core.allStores().forEach(st -> names.put(st.get("id").toString(), (String) st.get("name")));
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (var x : db.sql("""
+                select distinct i.investor_id, v.display_name, i.store_id from stl.investment_item i join stl.investor v on v.id = i.investor_id
+                where i.funding_source = 'INVESTOR' order by v.display_name""").query().listOfRows()) {
+            UUID inv = (UUID) x.get("investor_id"), store = (UUID) x.get("store_id");
+            BigDecimal share = shareOf(inv, store);
+            if (share == null) continue;
+            Map<String, Object> sm = stl.summary(store, period);
+            long profit = ((Number) sm.get("settlement_amount")).longValue();
+            long calc = Math.max(0, share.multiply(BigDecimal.valueOf(profit)).setScale(0, RoundingMode.FLOOR).longValue());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("investor_id", inv); m.put("investor_name", x.get("display_name")); m.put("store_id", store); m.put("store_name", names.get(store.toString()));
+            m.put("period", period); m.put("profit", profit); m.put("share_ratio", share); m.put("calculated_amount", calc); m.put("closed", sm.get("closed"));
+            m.put("investor_amount", db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ? and investor_id = ?").params(store, inv).query(Long.class).single());
+            m.put("store_total", db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ?").param(store).query(Long.class).single());
+            var p = db.sql("select id, decided_amount, status, memo, decided_at, paid_at from stl.investor_payout where investor_id = ? and store_id = ? and period = ?")
+                    .params(inv, store, period).query().listOfRows();
+            m.put("payout", p.isEmpty() ? null : p.get(0));
+            out.add(m);
+        }
+        return out;
+    }
+
+    public record PayoutReq(UUID investorId, UUID storeId, String period, Long decidedAmount, String status, String memo) {}
+
+    @PutMapping("/api/stl/investor-payouts")
+    @Transactional
+    public Map<String, Object> decide(@RequestBody PayoutReq r) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.HR_MGR);
+        if (r.investorId() == null || r.storeId() == null || r.period() == null) throw ApiException.bad("투자자·매장·귀속월을 확인하세요.");
+        if (r.decidedAmount() == null || r.decidedAmount() < 0) throw ApiException.bad("지급액(0원 이상)을 입력하세요.");
+        String st = Objects.requireNonNullElse(r.status(), "DECIDED");
+        if (!Set.of("DECIDED", "PAID").contains(st)) throw ApiException.bad("상태는 결정(DECIDED) / 지급 완료(PAID) 입니다.");
+        BigDecimal share = shareOf(r.investorId(), r.storeId());
+        if (share == null) throw ApiException.bad("이 매장에 이 투자자의 출자 항목이 없습니다.");
+        long profit = ((Number) stl.summary(r.storeId(), r.period()).get("settlement_amount")).longValue();
+        long calc = Math.max(0, share.multiply(BigDecimal.valueOf(profit)).setScale(0, RoundingMode.FLOOR).longValue());
+        db.sql("""
+                insert into stl.investor_payout(investor_id, store_id, period, profit, share_ratio, calculated_amount, decided_amount, status, memo, decided_by, paid_at)
+                values (?,?,?,?,?,?,?,?,?,?, case when ? = 'PAID' then now() end)
+                on conflict (investor_id, store_id, period) do update set profit = excluded.profit, share_ratio = excluded.share_ratio, calculated_amount = excluded.calculated_amount,
+                  decided_amount = excluded.decided_amount, status = excluded.status, memo = excluded.memo, decided_by = excluded.decided_by, decided_at = now(),
+                  paid_at = case when excluded.status = 'PAID' then coalesce(stl.investor_payout.paid_at, now()) else null end""")
+                .params(r.investorId(), r.storeId(), r.period(), profit, share, calc, r.decidedAmount(), st, r.memo(), u.id(), st).update();
+        audit(u.id(), "PAYOUT_" + st, r.investorId(), "{\"amount\":" + r.decidedAmount() + ",\"period\":\"" + r.period() + "\"}");
+        return Map.of("ok", true, "calculated", calc);
+    }
+
     @GetMapping("/api/stl/investments")
     public Map<String, Object> overview() {
         CurrentUser u = CurrentUser.get();
@@ -48,7 +114,7 @@ public class InvestmentController {
         for (var st : core.allStores()) {
             if (!isStore(st)) continue;   // 본사·베이커리는 투자 대상 매장이 아님
             UUID id = UUID.fromString(st.get("id").toString());
-            var items = db.sql("select * from stl.investment_item where store_id = ? order by invested_on, category").param(id).query().listOfRows();
+            var items = db.sql("select i.*, v.display_name investor_name from stl.investment_item i left join stl.investor v on v.id = i.investor_id where i.store_id = ? order by i.invested_on, i.category").param(id).query().listOfRows();
             long total = items.stream().mapToLong(i -> ((Number) i.get("amount")).longValue()).sum();
             long investorTotal = items.stream().filter(i -> "INVESTOR".equals(i.get("funding_source"))).mapToLong(i -> ((Number) i.get("amount")).longValue()).sum();
             Map<String, Long> byCat = new LinkedHashMap<>();
@@ -71,7 +137,7 @@ public class InvestmentController {
         return out;
     }
 
-    public record ItemReq(UUID storeId, String category, String description, Long amount, String investedOn, String fundingSource) {}
+    public record ItemReq(UUID storeId, String category, String description, Long amount, String investedOn, String fundingSource, UUID investorId) {}
 
     @PostMapping("/api/stl/investments")
     public Map<String, Object> add(@RequestBody ItemReq r) {
@@ -81,14 +147,15 @@ public class InvestmentController {
         String src = Objects.requireNonNullElse(r.fundingSource(), "HQ");
         if (!SOURCE.containsKey(src)) throw ApiException.bad("자금 출처는 투자자 출자(INVESTOR) / 본사 지원(HQ) 입니다.");
         UUID id = UUID.randomUUID();
-        db.sql("insert into stl.investment_item(id, store_id, category, description, amount, invested_on, funding_source, created_by) values (?,?,?,?,?, cast(? as date), ?, ?)")
+        if ("INVESTOR".equals(src) && r.investorId() == null) throw ApiException.bad("투자자 출자는 투자자를 고르세요.");
+        db.sql("insert into stl.investment_item(id, store_id, category, description, amount, invested_on, funding_source, investor_id, created_by) values (?,?,?,?,?, cast(? as date), ?, ?, ?)")
                 .params(id, r.storeId(), r.category(), Objects.requireNonNullElse(r.description(), CAT.get(r.category())), r.amount(),
-                        Objects.requireNonNullElse(r.investedOn(), LocalDate.now().toString()), src, u.id()).update();
+                        Objects.requireNonNullElse(r.investedOn(), LocalDate.now().toString()), src, "INVESTOR".equals(src) ? r.investorId() : null, u.id()).update();
         audit(u.id(), "INVESTMENT_ADD", id, "{\"amount\":" + r.amount() + "}");
         return Map.of("id", id);
     }
 
-    public record SourceReq(String fundingSource) {}
+    public record SourceReq(String fundingSource, UUID investorId) {}
 
     /** 자금 출처 변경 (투자자 출자 ↔ 본사 지원) */
     @PutMapping("/api/stl/investments/{id}")
@@ -96,7 +163,8 @@ public class InvestmentController {
         CurrentUser u = CurrentUser.get();
         u.require(Roles.HQ_ADMIN);
         if (!SOURCE.containsKey(r.fundingSource())) throw ApiException.bad("자금 출처는 INVESTOR / HQ 입니다.");
-        db.sql("update stl.investment_item set funding_source = ? where id = ?").params(r.fundingSource(), id).update();
+        if ("INVESTOR".equals(r.fundingSource()) && r.investorId() == null) throw ApiException.bad("투자자 출자는 투자자를 고르세요.");
+        db.sql("update stl.investment_item set funding_source = ?, investor_id = ? where id = ?").params(r.fundingSource(), "INVESTOR".equals(r.fundingSource()) ? r.investorId() : null, id).update();
         audit(u.id(), "INVESTMENT_SOURCE", id, "{\"source\":\"" + r.fundingSource() + "\"}");
         return Map.of("ok", true);
     }
@@ -198,6 +266,10 @@ public class InvestmentController {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("store_id", store);
             m.put("store_name", names.get(store.toString())); m.put("mode", mode); m.put("amount", shown);
+            BigDecimal fundShare = shareOf((UUID) inv.get(0).get("id"), store);
+            m.put("profit_share_ratio", fundShare);   // 이익금 배분 비율 = 내 출자 / (투자자 출자 + 본사 지원)
+            m.put("payouts", db.sql("select period, decided_amount, status, paid_at from stl.investor_payout where investor_id = ? and store_id = ? order by period desc")
+                    .params(inv.get(0).get("id"), store).query().listOfRows());
             if ("TOTAL".equals(mode)) {   // 총액 공개: 투자자 출자 / 본사 지원 구분
                 long invAmt = db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ? and funding_source = 'INVESTOR'").param(store).query(Long.class).single();
                 m.put("investor_total", invAmt); m.put("hq_total", total - invAmt);
@@ -205,10 +277,15 @@ public class InvestmentController {
             if ("RATIO".equals(mode)) m.put("ratio", d.get("ratio"));
             if (Boolean.TRUE.equals(d.get("show_settlement"))) {
                 long cum = cumulativeSettlement(store);
-                long share = "TOTAL".equals(mode) ? cum : "RATIO".equals(mode) ? ((BigDecimal) d.get("ratio")).multiply(BigDecimal.valueOf(cum)).longValue()
+                long share = fundShare != null ? fundShare.multiply(BigDecimal.valueOf(cum)).longValue() : "TOTAL".equals(mode) ? cum : "RATIO".equals(mode) ? ((BigDecimal) d.get("ratio")).multiply(BigDecimal.valueOf(cum)).longValue()
                         : total == 0 ? 0 : Math.round(cum * (double) shown / total);
                 m.put("cumulative_settlement", share);
-                m.put("recovery_rate", shown == 0 ? null : Math.round(share * 1000.0 / shown) / 10.0);
+                long base = shown;
+                if (fundShare != null) {   // 출자 비율 배분이면 회수율 = 내 몫 / 내 출자액
+                    base = db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ? and investor_id = ?").params(store, inv.get(0).get("id")).query(Long.class).single();
+                    m.put("my_investment", base);
+                }
+                m.put("recovery_rate", base == 0 ? null : Math.round(share * 1000.0 / base) / 10.0);
                 m.put("monthly", db.sql("""
                         select period, settlement_amount from stl.settlement_summary s where store_id = ?
                           and version = (select max(version) from stl.settlement_summary x where x.store_id = s.store_id and x.period = s.period) order by period""")
@@ -241,7 +318,8 @@ public class InvestmentController {
                 .param(inv.get()).query().listOfRows()) {
             UUID store = (UUID) d.get("store_id");
             boolean showStl = Boolean.TRUE.equals(d.get("show_settlement"));
-            BigDecimal ratio = "RATIO".equals(d.get("mode")) ? (BigDecimal) d.get("ratio") : BigDecimal.ONE;
+            BigDecimal fund = shareOf(inv.get(), store);
+            BigDecimal ratio = fund != null ? fund : "RATIO".equals(d.get("mode")) ? (BigDecimal) d.get("ratio") : BigDecimal.ONE;
             List<Map<String, Object>> months = new ArrayList<>();
             var fmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMM");
             // 매출액: 일 매출(과거 실적 포함). 이익: 결산 분개가 있는 달만 (없으면 null → 선 끊김)

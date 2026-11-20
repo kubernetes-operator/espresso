@@ -57,7 +57,7 @@ public class UserController {
         CurrentUser me = CurrentUser.get();
         List<Map<String, Object>> users = usersWithAssignments(null).stream()
                 .filter(u -> "ACTIVE".equals(u.get("status")) || me.isHqAdmin()).toList();
-        boolean hqView = me.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.HR_MGR);
+        boolean hqView = me.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.HR_MGR, Roles.SUPERVISOR);
         if (!hqView) {
             Set<UUID> myStores = new HashSet<>(), investStores = new HashSet<>();
             me.assignments().forEach(a -> {
@@ -69,7 +69,7 @@ public class UserController {
                 if (u.get("id").equals(me.id())) return true;
                 for (Map<String, Object> a : asgOf(u)) {
                     String role = (String) a.get("role");
-                    if ("HQ".equals(a.get("line")) && !Roles.SUPERVISOR.equals(role)) return true;
+                    if ("HQ".equals(a.get("line"))) return true;
                     if (Roles.INVESTOR.equals(role)) continue;
                     UUID sid = a.get("scopeId") == null ? null : UUID.fromString(a.get("scopeId").toString());
                     if (sid == null) continue;

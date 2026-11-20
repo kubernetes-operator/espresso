@@ -20,13 +20,17 @@ export function Settlement() {
   const data = d.data
   const one = data?.stores?.length === 1 ? data.stores[0] : null
   const v = one ?? data?.total
+  const [view, setView] = useState<'month' | 'week'>('month')
   const act = async (p: string, ok: string) => { setErr(null); try { await api(`/api/stl/settlement/${p}`, { body: { storeId, period } }); setMsg(ok); d.reload() } catch (e: any) { setErr(e.message) } }
   const row = (label: string, val: any, opt: { strong?: boolean; minus?: boolean; sub?: string } = {}) => (
     <tr className={opt.strong ? 'strong-row' : ''}><td>{opt.minus ? '− ' : ''}{label}{opt.sub && <small className="muted"> {opt.sub}</small>}</td><td className="num">{val == null ? <span className="muted">권한 없음</span> : won(val)}</td>
       <td className="num muted">{v?.net_sales && val != null ? `${(val / v.net_sales * 100).toFixed(1)}%` : ''}</td></tr>)
+  if (s.currentStore?.site_type === 'HQ') return <HqSettlement month={month} setMonth={setMonth} />
+  if (view === 'week') return <WeekView month={month} setMonth={setMonth} storeId={storeId} name={s.currentStore?.name ?? '볼 수 있는 매장 합산'} setView={setView} />
   return (
     <Page title="결산" sub={<>판매 수익 기준 월 결산 · 금액은 공급가(VAT 제외) {one && (one.closed ? <Badge tone="ok">마감</Badge> : <Badge tone="warn">진행 중{one.projected ? ' · 로열티·감가상각 예상치 포함' : ''}</Badge>)}</>}
       actions={<>
+        <div className="seg"><button className="on">월 결산</button><button onClick={() => setView('week')}>주 마감</button></div>
         <input id="stl-month" type="month" aria-label="월" value={month} onChange={e => setMonth(e.target.value)} />
         {one && storeId && s.has('OWNER', 'HQ_ADMIN') && <button onClick={async () => setAccts(await api(`/api/stl/settlement/accounts?storeId=${storeId}&period=${period}`))}>계정별 보기</button>}
         {storeId && s.has('OWNER', 'HQ_ADMIN') && <button onClick={() => setAssets(true)}>설비·비품</button>}
@@ -119,5 +123,67 @@ function AssetsModal({ storeId, storeName, onClose, onChanged }: any) {
           <button className="primary" onClick={dispose}>폐기 확정</button><button className="ghost" onClick={() => setTarget(null)}>취소</button></div>
       </div>}
     </Modal>
+  )
+}
+
+/** 주 마감: 월요일 시작 ~ 일요일, 일요일 24시 자동 확정 (분개를 잠그지 않는 주간 실적) */
+function WeekView({ month, setMonth, storeId, name, setView }: any) {
+  const d = useApi<any>(`/api/stl/settlement/weeks?month=${month}${storeId ? `&storeId=${storeId}` : ''}`, [month, storeId])
+  const ST: Record<string, any> = { OPEN: ['진행 중', 'warn'], CLOSED: ['주 마감', 'ok'], PENDING: ['마감 대기', 'info'] }
+  const ws: any[] = d.data?.weeks ?? []
+  return (
+    <Page title="결산 · 주 마감" sub={`${name} · 월요일 시작, 매주 일요일 24시 자동 마감 · 금액은 공급가(VAT 제외)`}
+      actions={<>
+        <div className="seg"><button onClick={() => setView('month')}>월 결산</button><button className="on">주 마감</button></div>
+        <input id="wk-month" type="month" aria-label="월" value={month} onChange={e => setMonth(e.target.value)} />
+      </>}>
+      <ErrorBox error={d.error} />
+      <div className="card table-wrap">
+        <table className="tbl">
+          <thead><tr><th>주</th><th>상태</th><th className="num">순매출</th><th className="num">매출원가</th><th className="num">매출총이익</th><th className="num">인건비</th><th className="num">임대·공과금</th><th className="num">운영·소모·손실</th><th className="num">감가상각</th><th className="num">영업이익</th><th>마감 시각</th></tr></thead>
+          <tbody>{ws.map(w => (
+            <tr key={w.week_start}>
+              <td><b>{w.week_start.slice(5)} ~ {w.week_end.slice(5)}</b></td>
+              <td><Badge tone={ST[w.status][1]}>{ST[w.status][0]}</Badge></td>
+              <td className="num">{won(w.net_sales)}</td><td className="num">{won(w.cogs)}</td><td className="num">{won(w.gross_profit)}</td>
+              <td className="num">{won(w.labor)}</td><td className="num">{won((w.rent ?? 0) + (w.utility ?? 0))}</td>
+              <td className="num">{won((w.operating_exp ?? 0) + (w.internal_use ?? 0) + (w.stock_loss ?? 0))}</td><td className="num">{won(w.depreciation)}</td>
+              <td className="num"><b>{won(w.operating_profit)}</b></td>
+              <td><small>{w.closed_at ? new Date(w.closed_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '—'}</small></td>
+            </tr>))}</tbody>
+        </table>
+      </div>
+      <p className="muted small">주 마감은 그 주의 분개(매출·물류 입고·비용·급여 등 발생일 기준)를 모은 확정 실적입니다. 급여·임대료처럼 월말에 잡히는 비용은 그 날짜가 속한 주에 들어가고, 로열티는 월 마감에서 계산합니다.</p>
+    </Page>
+  )
+}
+
+/** 본사 매출 = 로열티 합계 + 물류 이득(매장 공급가 − 본사 출고 원가) */
+function HqSettlement({ month, setMonth }: any) {
+  const period = month.replace('-', '')
+  const d = useApi<any>(`/api/stl/hq/summary?period=${period}`, [period])
+  const v = d.data
+  return (
+    <Page title="결산 · 본사" sub="본사 매출 = 로열티 합계 + 물류 이득 · 금액은 공급가(VAT 제외)"
+      actions={<input id="hq-month" type="month" aria-label="월" value={month} onChange={e => setMonth(e.target.value)} />}>
+      <ErrorBox error={d.error} />
+      {v && <>
+        <div className="grid3">
+          <div className="card stat"><small>본사 매출</small><b className="tnum">{won(v.hq_sales)}원</b><span className="muted small">로열티 + 물류 이득</span></div>
+          <div className="card stat"><small>로열티 합계</small><b className="tnum">{won(v.royalty)}원</b><span className="muted small">{v.stores.length}개 매장 (마감 전 달은 예상치)</span></div>
+          <div className="card stat"><small>물류 이득</small><b className="tnum">{won(v.logistics_margin)}원</b><span className="muted small">공급 {won(v.logistics_revenue)} − 원가 {won(v.logistics_cost)} · {v.requests}건</span></div>
+        </div>
+        <div className="grid2">
+          <section className="card table-wrap"><h2>매장별 로열티</h2>
+            <table className="tbl"><thead><tr><th>매장</th><th className="num">순매출</th><th className="num">로열티</th><th>상태</th></tr></thead>
+              <tbody>{v.stores.map((x: any) => <tr key={x.store_id}><td>{x.store_name}</td><td className="num">{won(x.net_sales)}</td><td className="num">{won(x.royalty)}</td>
+                <td>{x.closed ? <Badge tone="ok">마감</Badge> : <Badge tone="warn">예상</Badge>}</td></tr>)}</tbody></table></section>
+          <section className="card table-wrap"><h2>매장별 물류 공급 (본사 물류)</h2>
+            <table className="tbl"><thead><tr><th>매장</th><th className="num">공급가</th></tr></thead>
+              <tbody>{(v.logistics_by_store ?? []).map((x: any) => <tr key={x.store_id}><td>{x.store_name}</td><td className="num">{won(x.revenue)}</td></tr>)}</tbody></table>
+            <p className="muted small">물류 원가는 본사 창고에서 발송할 때 빠진 재고의 이동평균 단가 합계입니다(무상 재발송 원가 포함).</p></section>
+        </div>
+      </>}
+    </Page>
   )
 }

@@ -34,6 +34,27 @@ public class InternalController {
                 group by 1 order by 1""").params(storeId, from, to).query().listOfRows();
     }
 
+    /**
+     * 본사 물류 이득: 기간 안에 발송한 본사 물류 품목의 매장 공급가(무상 재발송 제외) − 본사 창고 출고 원가(이동평균)
+     */
+    @GetMapping("/hq/logistics")
+    public Map<String, Object> hqLogistics(@RequestParam String from, @RequestParam String to) {
+        Map<String, Object> m = new LinkedHashMap<>(db.sql("""
+                select coalesce(sum(l.supply_amount), 0) revenue, count(distinct r.id) requests
+                from logistics.request r join logistics.request_line l on l.request_id = r.id
+                where l.source_type = 'HQ' and l.line_status <> 'CANCELLED' and r.kind = 'NORMAL' and r.shipped_at is not null
+                  and (r.shipped_at at time zone 'Asia/Seoul')::date between cast(? as date) and cast(? as date)""").params(from, to).query().singleRow());
+        m.put("cost", db.sql("""
+                select coalesce(-sum(amount), 0) from inventory.stock_ledger where store_id = '00000000-0000-0000-0000-0000000000a0' and reason = 'TRANSFER_OUT'
+                  and (occurred_at at time zone 'Asia/Seoul')::date between cast(? as date) and cast(? as date)""").params(from, to).query(Long.class).single());
+        m.put("by_store", db.sql("""
+                select r.store_id, s.name store_name, coalesce(sum(l.supply_amount), 0) revenue
+                from logistics.request r join logistics.request_line l on l.request_id = r.id join store.store s on s.id = r.store_id
+                where l.source_type = 'HQ' and l.line_status <> 'CANCELLED' and r.kind = 'NORMAL' and r.shipped_at is not null
+                  and (r.shipped_at at time zone 'Asia/Seoul')::date between cast(? as date) and cast(? as date) group by 1, 2 order by 2""").params(from, to).query().listOfRows());
+        return m;
+    }
+
     @GetMapping("/stores/{id}/leases")
     public List<Map<String, Object>> leases(@PathVariable UUID id) {
         return db.sql("select * from store.store_lease where store_id = ? order by start_date").param(id).query().listOfRows();

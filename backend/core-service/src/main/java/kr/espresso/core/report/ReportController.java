@@ -64,7 +64,7 @@ public class ReportController {
                     join hr.payroll_run pr on pr.id = p.payroll_run_id where e.user_id = ? and pr.store_id = ? and pr.period = ? and p.published_at is not null""")
                     .params(u.id(), store, period).query().listOfRows());
             sections.put("MY_REQUESTS", db.sql("""
-                    select count(*) total, count(*) filter (where status = 'COMPLETED') completed from logistics.request
+                    select count(*) total, count(*) filter (where status in ('COMPLETED','CLOSED')) completed from logistics.request
                     where created_by = ? and store_id = ? and created_at::date between ? and ?""").params(u.id(), store, r.get("period_from"), r.get("period_to")).query().singleRow());
         }
         db.sql("insert into report.access_log(snapshot_id, viewer_id, role_code, format) values (?,?,?,?)")
@@ -131,7 +131,7 @@ public class ReportController {
             Map<String, Object> m = new LinkedHashMap<>();
             if (logi) {
                 m.putAll(db.sql("""
-                        select count(*) lr_count, coalesce(sum(total_amount) filter (where status = 'COMPLETED'),0) lr_amount,
+                        select count(*) lr_count, coalesce(sum(total_amount) filter (where status in ('COMPLETED','CLOSED')),0) lr_amount,
                           round(avg(extract(epoch from completed_at - requested_at)/3600) filter (where completed_at is not null)::numeric,1) lead_hours
                         from logistics.request where store_id = ? and created_at::date between ? and ?""").params(id, ym.atDay(1), ym.atEndOfMonth()).query().singleRow());
                 m.put("loss_amount", db.sql("select coalesce(sum(total_amount),0) from inventory.stock_adjustment where store_id = ? and status = 'APPROVED' and approved_at::date between ? and ?")

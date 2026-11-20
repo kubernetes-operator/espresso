@@ -86,8 +86,12 @@ public class AuthController {
         CurrentUser u = CurrentUser.get();
         var row = db.sql("select status, initial_password, vat_display_override from auth.app_user where id = ?").param(u.id()).query().listOfRows();
         if (row.isEmpty() || !"ACTIVE".equals(row.get(0).get("status"))) throw new ApiException(401, "ACCOUNT_SUSPENDED", "정지된 계정입니다.");
+        // 실제 배정만 (총괄·슈퍼바이저의 물류·인사 권한 확장은 각 서비스·화면에서 계산)
+        List<Map<String, Object>> raw = activeAssignments(u.id()).stream().map(a -> {
+            Map<String, Object> m = new LinkedHashMap<>(); m.put("role", a.get("r")); m.put("scopeType", a.get("t")); m.put("scopeId", a.get("s")); return m;
+        }).toList();
         return Map.of("id", u.id(), "loginId", u.loginId(), "name", u.name(),
-                "assignments", u.assignments(), "vatOverride", Objects.toString(row.get(0).get("vat_display_override"), ""),
+                "assignments", raw, "vatOverride", Objects.toString(row.get(0).get("vat_display_override"), ""),
                 "initialPassword", Boolean.TRUE.equals(row.get(0).get("initial_password")));
     }
 

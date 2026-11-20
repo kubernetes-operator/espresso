@@ -377,6 +377,19 @@ public class LogisticsService implements ApprovalHandler {
         return nid;
     }
 
+    public record CloseReq(String memo) {}
+
+    /** 물류 담당 확인 완료: 모든 처리(승인·발송·수령 검수)가 끝난 요청을 추적 화면에서 종결 */
+    @Transactional
+    public void confirmClose(UUID id, CloseReq req, CurrentUser u) {
+        var r = load(id);
+        scope.requireRoleOn(u, (UUID) r.get("store_id"), HQ_LOGI);
+        expect(r, "COMPLETED");
+        db.sql("update logistics.request set status = 'CLOSED', closed_at = now(), closed_by = ?, close_memo = ? where id = ?")
+                .params(u.id(), req == null ? null : blank(req.memo()), id).update();
+        trail.log(DOC, id, "COMPLETED", "CLOSED", u.id(), req == null || blank(req.memo()) == null ? "물류 확인 완료" : req.memo());
+    }
+
     public record DueReq(String dueDate) {}
 
     /** 처리 기한 지정 (물류 관리자·총괄) */

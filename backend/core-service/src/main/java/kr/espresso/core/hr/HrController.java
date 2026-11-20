@@ -41,8 +41,11 @@ public class HrController {
         CurrentUser u = CurrentUser.get();
         Set<UUID> st = sites(u, storeId, VIEW);
         if (st.isEmpty()) return List.of();
-        Set<UUID> moneyStores = new HashSet<>();
-        for (UUID s : st) if (scope.hasRoleOn(u, s, Roles.HR_MGR, Roles.HQ_ADMIN) || payrollVisible(u, s)) moneyStores.add(s);
+        Set<UUID> moneyStores = new HashSet<>(), partTimeOnly = new HashSet<>();
+        for (UUID s : st) {
+            if (scope.hasRoleOn(u, s, Roles.HR_MGR, Roles.HQ_ADMIN) || (payrollVisible(u, s) && scope.hasRoleOn(u, s, Roles.OWNER))) moneyStores.add(s);
+            else if (scope.hasRoleOn(u, s, Roles.STORE_MGR)) partTimeOnly.add(s);   // 매장 관리자: 아르바이트 시급만
+        }
         return db.sql("""
                 select e.id, e.user_id, e.store_id, s.name store_name, s.site_type, e.emp_no, e.name, e.job_title, e.hire_date, e.resign_date, e.status,
                        c.id contract_id, c.employment_type, c.pay_type, c.base_wage, c.salary_grade, g.annual_salary, g.group_name grade_group_name,
@@ -55,6 +58,9 @@ public class HrController {
                 .param("st", st).query().listOfRows()
                 .stream().map(r -> {
                     if (moneyStores.contains((UUID) r.get("store_id"))) return r;
+                    if (partTimeOnly.contains((UUID) r.get("store_id")) && "PART_TIME".equals(r.get("employment_type")) && "HOURLY".equals(r.get("pay_type"))) {
+                        Map<String, Object> m = new LinkedHashMap<>(r); m.put("allowances", null); return m;
+                    }
                     Map<String, Object> m = new LinkedHashMap<>(r); m.put("base_wage", null); m.put("annual_salary", null); m.put("allowances", null); return m;
                 }).toList();
     }
@@ -62,8 +68,8 @@ public class HrController {
     /** 점주·매장관리자의 개인별 급여 열람 허용 여부 (매장 설정) */
     boolean payrollVisible(CurrentUser u, UUID storeId) {
         var s = db.sql("select owner_payroll_detail_visible o, manager_payroll_detail_visible m from store.store where id = ?").param(storeId).query().singleRow();
-        return (Boolean.TRUE.equals(s.get("o")) && scope.hasRoleOn(u, storeId, Roles.OWNER))
-                || (Boolean.TRUE.equals(s.get("m")) && scope.hasRoleOn(u, storeId, Roles.STORE_MGR));
+        // 2차 점검 반영: 매장 관리자는 개인별 급여를 보지 않음 (직원 목록에서 아르바이트 시급만)
+        return Boolean.TRUE.equals(s.get("o")) && scope.hasRoleOn(u, storeId, Roles.OWNER);
     }
 
     /** 기타 비과세 항목 (예: 자가운전보조금, 출산·보육수당) */
@@ -128,6 +134,7 @@ public class HrController {
             wage = annual / 12; payType = "MONTHLY";
         }
         String type = Objects.requireNonNullElse(r.employmentType(), grade != null ? "REGULAR" : "PART_TIME");
+        if (grade != null && grade.startsWith("f")) type = "FREELANCER";   // 프리랜서 등급 = 3.3% 원천징수만
         boolean free = "FREELANCER".equals(type);
         Map<String, Object> allow = new LinkedHashMap<>();
         if (r.mealAllowance() != null && r.mealAllowance() > 0) allow.put("meal", r.mealAllowance());
@@ -142,7 +149,7 @@ public class HrController {
                   national_pension, health_insurance, employment_insurance, tax_dependents, non_taxable_allowances, valid_from, salary_grade)
                 values (?,?,?,?,?,?,?,?,?,?,?, cast(? as jsonb), ?, ?)""")
                 .params(emp, type, payType, wage, Objects.requireNonNullElse(r.weeklyHours(), new BigDecimal("40")),
-                        r.weeklyHolidayPay() == null || r.weeklyHolidayPay(), free ? "BIZ_3_3" : Objects.requireNonNullElse(r.incomeTaxType(), "WAGE"),
+                        !free && (r.weeklyHolidayPay() == null || r.weeklyHolidayPay()), free ? "BIZ_3_3" : Objects.requireNonNullElse(r.incomeTaxType(), "WAGE"),
                         !free && (r.nationalPension() == null || r.nationalPension()), !free && (r.healthInsurance() == null || r.healthInsurance()),
                         !free && (r.employmentInsurance() == null || r.employmentInsurance()), Objects.requireNonNullElse(r.taxDependents(), 1),
                         allowJson, from, grade).update();
@@ -256,68 +263,11 @@ public class HrController {
         return Map.of("regularMinutes", m.regular(), "overtimeMinutes", m.overtime());
     }
 
-    // ---------------- 근무표 (매장별 계획) ----------------
-    @GetMapping("/schedule")
-    public Map<String, Object> schedule(@RequestParam UUID storeId, @RequestParam String from, @RequestParam String to) {
-        CurrentUser u = CurrentUser.get();
-        scope.requireRoleOn(u, storeId, Roles.HR_MGR, Roles.HQ_ADMIN, Roles.OWNER, Roles.STORE_MGR, Roles.STAFF);
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("employees", db.sql("select id, emp_no, name, job_title from hr.employee where store_id = ? and status = 'ACTIVE' order by emp_no").param(storeId).query().listOfRows());
-        m.put("items", db.sql("""
-                select s.id, s.employee_id, s.work_date, to_char(s.start_time, 'HH24:MI') start_time, to_char(s.end_time, 'HH24:MI') end_time, s.memo
-                from hr.work_schedule s where s.store_id = ? and s.work_date between cast(? as date) and cast(? as date) order by s.work_date, s.start_time""")
-                .params(storeId, from, to).query().listOfRows());
-        m.put("canEdit", scope.hasRoleOn(u, storeId, SCHEDULE_EDIT));
-        return m;
-    }
-
-    public record ScheduleReq(UUID employeeId, String workDate, String startTime, String endTime, String memo) {}
-
-    @PutMapping("/schedule")
-    public Map<String, Object> putSchedule(@RequestBody ScheduleReq r) {
-        CurrentUser u = CurrentUser.get();
-        UUID store = db.sql("select store_id from hr.employee where id = ?").param(r.employeeId()).query(UUID.class).optional().orElseThrow(() -> ApiException.notFound("직원"));
-        scope.requireRoleOn(u, store, SCHEDULE_EDIT);
-        LocalTime a = LocalTime.parse(r.startTime()), b = LocalTime.parse(r.endTime());
-        if (a.equals(b)) throw ApiException.bad("시작·종료 시각이 같습니다.");
-        db.sql("""
-                insert into hr.work_schedule(store_id, employee_id, work_date, start_time, end_time, memo, created_by) values (?,?, cast(? as date), ?, ?, ?, ?)
-                on conflict (employee_id, work_date) do update set start_time = excluded.start_time, end_time = excluded.end_time, memo = excluded.memo""")
-                .params(store, r.employeeId(), r.workDate(), a, b, blank(r.memo()), u.id()).update();
-        return Map.of("ok", true);
-    }
-
-    @DeleteMapping("/schedule/{id}")
-    public Map<String, Object> deleteSchedule(@PathVariable UUID id) {
-        CurrentUser u = CurrentUser.get();
-        UUID store = db.sql("select store_id from hr.work_schedule where id = ?").param(id).query(UUID.class).optional().orElseThrow(() -> ApiException.notFound("근무표"));
-        scope.requireRoleOn(u, store, SCHEDULE_EDIT);
-        db.sql("delete from hr.work_schedule where id = ?").param(id).update();
-        return Map.of("ok", true);
-    }
-
-    public record CopyWeekReq(UUID storeId, String fromMonday, String toMonday) {}
-
-    /** 지난주 근무표를 이번 주로 복사 (이미 있는 날은 유지) */
-    @PostMapping("/schedule/copy-week")
-    public Map<String, Object> copyWeek(@RequestBody CopyWeekReq r) {
-        CurrentUser u = CurrentUser.get();
-        scope.requireRoleOn(u, r.storeId(), SCHEDULE_EDIT);
-        LocalDate f = LocalDate.parse(r.fromMonday()), t = LocalDate.parse(r.toMonday());
-        int n = db.sql("""
-                insert into hr.work_schedule(store_id, employee_id, work_date, start_time, end_time, memo, created_by)
-                select s.store_id, s.employee_id, s.work_date + ?, s.start_time, s.end_time, s.memo, ? from hr.work_schedule s
-                join hr.employee e on e.id = s.employee_id and e.status = 'ACTIVE'
-                where s.store_id = ? and s.work_date between ? and ? on conflict (employee_id, work_date) do nothing""")
-                .params((int) (t.toEpochDay() - f.toEpochDay()), u.id(), r.storeId(), f, f.plusDays(6)).update();
-        return Map.of("copied", n);
-    }
-
     // ---------------- 연봉 테이블 ----------------
     @GetMapping("/salary-grades")
     public List<Map<String, Object>> grades() {
         CurrentUser.get().require(Roles.HQ_ADMIN, Roles.HR_MGR);
-        return db.sql("select code, grade_group, group_name, step, annual_salary, annual_salary / 12 as monthly, memo, updated_at from hr.salary_grade order by grade_group, step")
+        return db.sql("select code, grade_group, group_name, step, annual_salary, annual_salary / 12 as monthly, memo, updated_at from hr.salary_grade order by case grade_group when 'f' then 1 else 0 end, grade_group, step")
                 .query().listOfRows();
     }
 
@@ -334,6 +284,41 @@ public class HrController {
         return Map.of("ok", true);
     }
 
+    @GetMapping("/salary-grade-groups")
+    public List<Map<String, Object>> gradeGroups() {
+        CurrentUser.get().require(Roles.HQ_ADMIN, Roles.HR_MGR);
+        return db.sql("select * from hr.salary_grade_group order by case grade_group when 'f' then 1 else 0 end, grade_group").query().listOfRows();
+    }
+
+    public record GroupRuleReq(Long base, BigDecimal raiseRate, Long increment, String name) {}
+
+    /**
+     * 1단계 금액 + 상승 규칙으로 20단계 전체 다시 작성 → 해당 등급 직원 현재 계약 월급도 갱신.
+     * raiseRate(예: 0.03 = 단계마다 3% 복리) 가 있으면 우선, 없으면 increment(원) 만큼 일정하게. 연 금액은 1,000원 단위 반올림
+     */
+    @PutMapping("/salary-grade-groups/{group}")
+    @Transactional
+    public Map<String, Object> setGroupRule(@PathVariable String group, @RequestBody GroupRuleReq r) {
+        CurrentUser.get().require(Roles.HQ_ADMIN, Roles.HR_MGR);
+        if (r.base() == null || r.base() <= 0) throw ApiException.bad("1단계 금액을 입력하세요.");
+        if (r.raiseRate() == null && r.increment() == null) throw ApiException.bad("상승률(%) 또는 단계별 증가액을 입력하세요.");
+        if (r.raiseRate() != null && (r.raiseRate().signum() < 0 || r.raiseRate().compareTo(new BigDecimal("0.5")) > 0)) throw ApiException.bad("상승률은 0~50% 입니다.");
+        var g = db.sql("select pay_unit from hr.salary_grade_group where grade_group = ?").param(group).query(String.class).optional().orElseThrow(() -> ApiException.notFound("직급군"));
+        boolean monthly = "MONTHLY".equals(g);
+        long base = monthly ? r.base() * 12 : r.base();   // 프리랜서는 월 금액으로 입력
+        for (int i = 1; i <= 20; i++) {
+            double v = r.raiseRate() != null ? base * Math.pow(1 + r.raiseRate().doubleValue(), i - 1) : base + (long) (i - 1) * (monthly ? r.increment() * 12 : r.increment());
+            long annual = Math.round(v / 1000.0) * 1000;
+            db.sql("update hr.salary_grade set annual_salary = ?, updated_at = now() where grade_group = ? and step = ?").params(annual, group, i).update();
+        }
+        db.sql("update hr.salary_grade_group set base_amount = ?, raise_rate = ?, increment = ?, group_name = coalesce(cast(? as varchar), group_name), updated_at = now() where grade_group = ?")
+                .params(base, r.raiseRate(), r.raiseRate() != null ? null : (monthly ? r.increment() * 12 : r.increment()), blank(r.name()), group).update();
+        int n = db.sql("""
+                update hr.employment_contract c set base_wage = g.annual_salary / 12 from hr.salary_grade g
+                where g.code = c.salary_grade and g.grade_group = ? and c.valid_to is null""").param(group).update();
+        return Map.of("ok", true, "contracts", n);
+    }
+
     public record GradeGroupReq(String prefix, String name, Long base, Long increment) {}
 
     /** 직급군 추가: 접두어 + 20단계 (예: b 베이커 → b1~b20) */
@@ -345,6 +330,7 @@ public class HrController {
         if (r.name() == null || r.name().isBlank() || r.base() == null || r.base() < 0) throw ApiException.bad("직급군 이름과 1단계 연봉을 입력하세요.");
         if (db.sql("select count(*) from hr.salary_grade where grade_group = ?").param(p).query(Integer.class).single() > 0) throw ApiException.conflict("이미 있는 접두어입니다.");
         long inc = Objects.requireNonNullElse(r.increment(), 0L);
+        db.sql("insert into hr.salary_grade_group(grade_group, group_name, base_amount, increment) values (?,?,?,?)").params(p, r.name().trim(), r.base(), inc).update();
         for (int i = 1; i <= 20; i++)
             db.sql("insert into hr.salary_grade(code, grade_group, group_name, step, annual_salary) values (?,?,?,?,?)").params(p + i, p, r.name().trim(), i, r.base() + (i - 1) * inc).update();
         return Map.of("ok", true);

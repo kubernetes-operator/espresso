@@ -87,20 +87,20 @@ function ExpenseModal({ storeId, accounts, canRent, onClose, onDone }: any) {
     <Modal title="비용 입력" onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); save(true) }}>
         <div className="row">
-          <div><label htmlFor="ex-kind">구분</label><select id="ex-kind" value={f.expenseKind} onChange={e => setF({ ...f, expenseKind: e.target.value, accountCode: KIND_ACC[e.target.value][0] })}>
+          <div><label htmlFor="ex-kind">구분</label><select id="ex-kind" required value={f.expenseKind} onChange={e => setF({ ...f, expenseKind: e.target.value, accountCode: KIND_ACC[e.target.value][0] })}>
             {Object.entries(KIND).filter(([k]) => canRent || k !== 'RENT').map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
-          <div><label htmlFor="ex-acc">계정과목</label><select id="ex-acc" value={f.accountCode} onChange={e => setF({ ...f, accountCode: e.target.value })}>{accs.map((a: any) => <option key={a.code} value={a.code}>{a.name}</option>)}</select></div>
+          <div><label htmlFor="ex-acc">계정과목</label><select id="ex-acc" required value={f.accountCode} onChange={e => setF({ ...f, accountCode: e.target.value })}>{accs.map((a: any) => <option key={a.code} value={a.code}>{a.name}</option>)}</select></div>
         </div>
         <div className="row">
           <div><label htmlFor="ex-vendor">거래처</label><input id="ex-vendor" value={f.vendorName} onChange={e => setF({ ...f, vendorName: e.target.value })} placeholder="예: 한국전력" /></div>
-          <div><label htmlFor="ex-date">일자</label><input id="ex-date" type="date" value={f.expenseDate} onChange={e => setF({ ...f, expenseDate: e.target.value })} /></div>
+          <div><label htmlFor="ex-date">일자</label><input id="ex-date" required type="date" value={f.expenseDate} onChange={e => setF({ ...f, expenseDate: e.target.value })} /></div>
         </div>
         {f.expenseKind === 'UTILITY' && <div className="row">
           <div><label htmlFor="ex-uf">사용 기간 시작</label><input id="ex-uf" type="date" value={f.usageFrom} onChange={e => setF({ ...f, usageFrom: e.target.value })} /></div>
           <div><label htmlFor="ex-ut">사용 기간 끝</label><input id="ex-ut" type="date" value={f.usageTo} onChange={e => setF({ ...f, usageTo: e.target.value })} /></div>
         </div>}
         <div className="row">
-          <div><label htmlFor="ex-amt">금액</label><input id="ex-amt" inputMode="numeric" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="ex-amt">금액</label><input id="ex-amt" required inputMode="numeric" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value.replace(/\D/g, '') })} /></div>
           <div><label htmlFor="ex-mode">금액 기준</label><select id="ex-mode" value={f.amountMode} onChange={e => setF({ ...f, amountMode: e.target.value })}><option value="INCLUSIVE">VAT 포함</option><option value="EXCLUSIVE">VAT 별도</option></select></div>
           <div><label htmlFor="ex-tax">과세</label><select id="ex-tax" value={f.taxType} onChange={e => setF({ ...f, taxType: e.target.value })}><option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
         </div>
@@ -110,7 +110,7 @@ function ExpenseModal({ storeId, accounts, canRent, onClose, onDone }: any) {
         </div>
         <label htmlFor="ex-memo">메모</label><input id="ex-memo" value={f.memo} onChange={e => setF({ ...f, memo: e.target.value })} />
         {err && <div className="error-box">{err}</div>}
-        <div className="act-buttons"><button type="button" onClick={() => save(false)}>임시저장</button><button className="primary" disabled={!f.amount}>상신</button></div>
+        <div className="act-buttons"><button type="button" onClick={() => save(false)}>임시저장</button><button className="primary">상신</button></div>
       </form>
     </Modal>
   )

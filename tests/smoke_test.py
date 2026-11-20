@@ -57,7 +57,7 @@ for u, n in expect.items():
     names = [x["name"] for x in stores] if s == 200 else []
     check(f"{u} 로그인 및 매장 {n}곳 이상", s == 200 and len(names) >= n, f"{s} {names}")
 s, stores = req("GET", "/api/core/stores", tok("sv"))
-check("sv(슈퍼바이저·비활성) 볼 수 있는 매장 없음", s == 200 and stores == [], str(stores)[:80])
+check("sv(슈퍼바이저) 담당 권역(서울) 매장만", s == 200 and {GN, HD} <= {x["id"] for x in stores} and PG not in {x["id"] for x in stores}, str([x["name"] for x in stores])[:80])
 s, stores = req("GET", "/api/core/stores", tok("investor1"))
 check("investor1 운영 매장 범위 없음", s == 200 and stores == [])
 check("잘못된 비밀번호 거부", req("POST", "/api/auth/login", body={"loginId": "admin", "password": "x"})[0] == 401)
@@ -324,19 +324,19 @@ check("owner2 강남 근무표 접근 불가 (403)", req("GET", f"/api/core/hr/s
 # 급여: 연봉 등급 · 상여금 · 퇴직금 · 전체 합산 표
 period_now = today.strftime("%Y%m")
 s, hq_emps = req("GET", f"/api/core/hr/employees?storeId={HQ}", tok("hr"))
-adm = [e for e in hq_emps if e["name"] == "최총괄"][0]
+adm = [e for e in hq_emps if e["name"] == "장총괄"][0]
 cur_run = [x for x in req("GET", f"/api/core/payroll/runs?storeId={HQ}", tok("hr"))[1] if x["period"] == period_now]
 if not cur_run or cur_run[0]["status"] in ("DRAFT", "CALCULATED", "REJECTED"):
     check("상여금 입력", req("PUT", "/api/core/payroll/extras", tok("hr"), {"storeId": HQ, "period": period_now, "employeeId": adm["id"], "code": "BONUS", "amount": 300000})[0] == 200)
     s, run = req("POST", "/api/core/payroll/runs", tok("hr"), {"storeId": HQ, "period": period_now})
     s, rd = req("GET", f"/api/core/payroll/runs/{run.get('id')}", tok("hr"))
-    slip = [p for p in rd["payslips"] if p["name"] == "최총괄"][0]
+    slip = [p for p in rd["payslips"] if p["name"] == "장총괄"][0]
     codes = {i["code"]: i["amount"] for i in json.loads(slip["items"])}
     check("본사 급여: 연봉 등급 월급 + 상여금", codes.get("BONUS") == 300000 and codes.get("BASE", 0) > 0, str(codes)[:150])
 else:
     check("상여금 입력 (이번 달 본사 급여 확정됨 → 건너뜀)", True); check("본사 급여: 연봉 등급 월급 + 상여금 (건너뜀)", True)
 s, ex = req("GET", f"/api/core/payroll/extras?storeId={HQ}&period={period_now}", tok("hr"))
-check("상여·퇴직금 입력 목록", s == 200 and any(e["name"] == "최총괄" for e in ex))
+check("상여·퇴직금 입력 목록", s == 200 and any(e["name"] == "장총괄" for e in ex))
 check("mgr1 상여금 입력 불가 (403)", req("PUT", "/api/core/payroll/extras", tok("mgr1"), {"storeId": GN, "period": period_now, "employeeId": adm["id"], "code": "BONUS", "amount": 1})[0] == 403)
 s, sm = req("GET", "/api/core/payroll/summary", tok("hr"))
 check("급여 전체: 사이트별 지급 총액 표", s == 200 and len({r["store_id"] for r in sm["rows"]}) >= 3)
@@ -359,14 +359,110 @@ check("staff1 비교 기준값 접근 불가 (403)", req("GET", f"/api/stl/compa
 s, it = req("GET", "/api/stl/investor/me/trend", tok("investor1"))
 check("투자자 분석: 투자 매장 12개월 매출·이익", s == 200 and it and len(it[0]["months"]) == 12 and "operating_profit" in it[0]["months"][0])
 # 투자금: 투자자 출자 / 본사 지원
-s, inv = req("POST", "/api/stl/investments", tok("admin"), {"storeId": GN, "category": "OTHER", "description": "스모크 출자", "amount": 1000, "fundingSource": "INVESTOR"})
+inv_id = req("GET", "/api/stl/investments", tok("admin"))[1]["investors"][0]["id"]
+s, inv = req("POST", "/api/stl/investments", tok("admin"), {"storeId": GN, "category": "OTHER", "description": "스모크 출자", "amount": 1000, "fundingSource": "INVESTOR", "investorId": inv_id})
 s2, ov = req("GET", "/api/stl/investments", tok("admin"))
 g = [x for x in ov["stores"] if x["store_id"] == GN][0]
 check("투자금: 투자자 출자 + 본사 지원 = 구성 총액", s == 200 and g["investor_total"] >= 1000 and g["investor_total"] + g["hq_total"] == g["total"]
       and all(x["store_id"] not in (HQ, BK) for x in ov["stores"]))
 req("DELETE", f"/api/stl/investments/{inv.get('id')}", tok("admin"))
 
-section("10. 게이트웨이")
+section("10. 2차 사용자 점검 반영 (주 마감·본사 매출·투자자 지급·근무 마감·근무표 로테이션·물류 확인 완료)")
+# 비용 영업외 (이전: DataIntegrity 오류)
+s, e = req("POST", "/api/stl/expenses", tok("mgr1"), {"storeId": GN, "expenseKind": "NON_OPERATING", "accountCode": "980", "vendorName": "스모크 영업외",
+    "amount": 11000, "amountMode": "INCLUSIVE", "submit": False})
+check("비용 구분 '영업외' 저장", s == 200, str(e)[:120])
+# 권한: 총괄·슈퍼바이저 = 물류·인사 권한 포함, 매장 관리자 급여 제한
+check("sv 인사 권한(연봉 테이블)·물류 권한(물류 목록)", req("GET", "/api/core/hr/salary-grades", tok("sv"))[0] == 200 and req("GET", f"/api/core/logistics?storeId={GN}", tok("sv"))[0] == 200)
+check("sv 담당 권역 밖 직원 접근 불가 (403)", req("GET", f"/api/core/hr/employees?storeId={PG}", tok("sv"))[0] == 403)
+s, emps = req("GET", f"/api/core/hr/employees?storeId={GN}", tok("mgr1"))
+check("매장 관리자: 아르바이트 시급만 보임", s == 200 and all((x["base_wage"] is not None) == (x["employment_type"] == "PART_TIME" and x["pay_type"] == "HOURLY") for x in emps)
+      and any(x["base_wage"] is not None for x in emps), str([(x["name"], x["employment_type"], x["base_wage"]) for x in emps])[:200])
+s, org = req("GET", "/api/auth/org", tok("mgr1"))
+check("조직도: 슈퍼바이저 표시", s == 200 and any(u["loginId"] == "sv" for u in org["users"]))
+s, me = req("GET", "/api/auth/me", tok("admin"))
+check("총괄 이름 장총괄", s == 200 and me["name"] == "장총괄")
+# 연봉 테이블: 1단계 + 상승률로 20단계 / 프리랜서
+check("1단계 + 상승률 3% → 20단계 재작성", req("PUT", "/api/core/hr/salary-grade-groups/s", tok("hr"), {"base": 26000000, "raiseRate": 0.03})[0] == 200)
+g = {x["code"]: x["annual_salary"] for x in req("GET", "/api/core/hr/salary-grades", tok("hr"))[1]}
+check("s20 = 26,000,000 × 1.03^19 (천원 반올림)", g["s20"] == round(26000000 * 1.03 ** 19 / 1000) * 1000, str(g["s20"]))
+req("PUT", "/api/core/hr/salary-grade-groups/s", tok("hr"), {"base": 26000000, "increment": 800000})
+check("프리랜서 f1~f20 (월 100만원 단위)", g.get("f1") == 12000000 and g.get("f20") == 240000000)
+s, acc = req("POST", "/api/core/hr/accounts", tok("hr"), {"loginId": f"fl{ts}", "name": "스모크프리", "site": "STORE", "role": "STAFF", "scopeId": GN,
+    "employee": {"register": True, "employmentType": "FREELANCER", "salaryGrade": "f3", "weeklyHours": 20}})
+fl = [x for x in req("GET", f"/api/core/hr/employees?storeId={GN}", tok("hr"))[1] if x["user_id"] == acc.get("userId")]
+check("프리랜서 등급 f3 → 3.3% 계약, 월 300만원", s == 200 and fl and fl[0]["employment_type"] == "FREELANCER" and fl[0]["income_tax_type"] == "BIZ_3_3" and fl[0]["base_wage"] == 3000000, str(fl)[:150])
+# 근무표
+mon = today - datetime.timedelta(days=today.weekday())
+f4 = mon + datetime.timedelta(days=27)
+s, sc = req("GET", f"/api/core/hr/schedule?storeId={GN}&from={mon}&to={f4}", tok("mgr1"))
+types = {i["shift_type"] for i in sc["items"]} if s == 200 else set()
+check("4주 근무표: 오픈·마감·일반 자동 로테이션", s == 200 and {"OPEN", "CLOSE"} <= types and sc["settings"]["peakStart"].startswith("11:30"), str(types))
+emp_by = {e["name"]: e["id"] for e in sc["employees"]}
+offday = (mon + datetime.timedelta(days=16)).isoformat()
+check("staff1 본인 휴무 지정", req("PUT", "/api/core/hr/schedule/dayoff", tok("staff1"), {"employeeId": emp_by["강사원"], "date": offday, "kind": "OFF"})[0] == 200)
+check("staff1 남의 휴무 지정 불가 (403)", req("PUT", "/api/core/hr/schedule/dayoff", tok("staff1"), {"employeeId": emp_by["알바A"], "date": offday, "kind": "OFF"})[0] == 403)
+check("수동 조정은 승인 메모 필수 (400)", req("PUT", "/api/core/hr/schedule", tok("mgr1"), {"employeeId": emp_by["알바A"], "workDate": offday, "startTime": "10:00", "endTime": "16:00"})[0] == 400)
+check("수동 조정 (메모)", req("PUT", "/api/core/hr/schedule", tok("mgr1"), {"employeeId": emp_by["알바A"], "workDate": offday, "startTime": "10:00", "endTime": "16:00", "shiftType": "MID", "memo": "스모크 조정"})[0] == 200)
+s, gr = req("POST", "/api/core/hr/schedule/generate", tok("mgr1"), {"storeId": GN, "monday": mon.isoformat(), "weeks": 4})
+s2, sc = req("GET", f"/api/core/hr/schedule?storeId={GN}&from={mon}&to={f4}", tok("mgr1"))
+kept = [i for i in sc["items"] if i["employee_id"] == emp_by["알바A"] and i["work_date"] == offday]
+check("자동 로테이션 재생성: 휴무일 비움 · 수동 조정 유지", s == 200 and gr["created"] > 0
+      and not any(i["employee_id"] == emp_by["강사원"] and i["work_date"] == offday for i in sc["items"])
+      and kept and kept[0]["start_time"] == "10:00" and kept[0]["adjust_memo"] == "스모크 조정", str(gr)[:120])
+# 긴급 연차 → 대체
+day2 = (mon + datetime.timedelta(days=17)).isoformat()
+shift = next((i for i in sc["items"] if i["work_date"] == day2), None)
+if shift:
+    s, subs = req("GET", f"/api/core/hr/schedule/substitutes?employeeId={shift['employee_id']}&date={day2}", tok("mgr1"))
+    sub = subs[0]["id"] if s == 200 and subs else None
+    s, _ = req("POST", "/api/core/hr/schedule/leave", tok("mgr1"), {"employeeId": shift["employee_id"], "date": day2, "substituteId": sub, "memo": "스모크 긴급 연차"})
+    s2, sc = req("GET", f"/api/core/hr/schedule?storeId={GN}&from={day2}&to={day2}", tok("mgr1"))
+    check("긴급 연차 → 대체 근무 배정", s == 200 and (sub is None or any(i["employee_id"] == sub and i["substitute_for"] == shift["employee_id"] for i in sc["items"]))
+          and any(o["employee_id"] == shift["employee_id"] and o["kind"] == "LEAVE" for o in sc["dayoffs"]), str(sc["items"])[:150])
+else:
+    check("긴급 연차 → 대체 근무 배정 (그날 근무 없음 → 건너뜀)", True)
+s, hs = req("GET", f"/api/core/hr/schedule?storeId={HQ}&from={mon}&to={mon + datetime.timedelta(days=6)}", tok("admin"))
+check("본사 근무표: 평일 09:00~18:00", s == 200 and hs["items"] and all(i["start_time"] == "09:00" and i["end_time"] == "18:00" for i in hs["items"])
+      and all(datetime.date.fromisoformat(i["work_date"]).weekday() < 5 for i in hs["items"]))
+# 근무 마감 → 일 소계 → 일 매출
+s, b = req("POST", "/api/core/sales/shift-closes", tok("staff1"), {"storeId": GN, "beverage": 50000, "dessert": 20000, "card": 60000, "cash": 5000})
+check("근무 마감: 결제 합계 불일치 거부 + 차이 안내", s == 400 and "차이" in b.get("message", ""), str(b)[:100])
+check("staff1 근무 마감", req("POST", "/api/core/sales/shift-closes", tok("staff1"), {"storeId": GN, "beverage": 50000, "dessert": 20000, "card": 60000, "cash": 10000, "customers": 9})[0] == 200)
+check("mgr1 근무 마감", req("POST", "/api/core/sales/shift-closes", tok("mgr1"), {"storeId": GN, "beverage": 30000, "tableware": 5000, "card": 35000})[0] == 200)
+s, sl = req("GET", f"/api/core/sales/shift-closes?storeId={GN}", tok("staff1"))
+check("오늘 소계 = 마감 합", s == 200 and sl["subtotal"]["net"] >= 105000 and sl["canApply"] is False)
+check("staff1 일 매출 반영 불가 (403)", req("POST", "/api/core/sales/shift-closes/apply", tok("staff1"), {"storeId": GN, "date": today.isoformat()})[0] == 403)
+s, ap = req("POST", "/api/core/sales/shift-closes/apply", tok("mgr1"), {"storeId": GN, "date": today.isoformat()})
+s2, dl = req("GET", f"/api/core/sales?storeId={GN}&month={cur_month}", tok("mgr1"))
+check("소계 → 일 매출 반영", s == 200 and any(x["sales_date"] == today.isoformat() and x["total_amount"] >= sl["subtotal"]["net"] for x in dl), str(ap)[:100])
+# 물류 확인 완료
+check("mgr1 물류 확인 완료 불가 (403)", req("POST", f"/api/core/logistics/{lr2}/close", tok("mgr1"), {})[0] == 403)
+check("logi 물류 확인 완료 → CLOSED", req("POST", f"/api/core/logistics/{lr2}/close", tok("logi"), {"memo": "스모크 확인"})[0] == 200
+      and req("GET", f"/api/core/logistics/{lr2}", tok("logi"))[1]["status"] == "CLOSED")
+# 주 마감
+s, wk = req("GET", f"/api/stl/settlement/weeks?storeId={GN}&month={cur_month}", tok("owner1"))
+check("주 마감: 월요일 시작 주 목록, 이번 주 진행 중", s == 200 and wk["weeks"] and all(datetime.date.fromisoformat(w["week_start"]).weekday() == 0 for w in wk["weeks"])
+      and wk["weeks"][-1]["status"] == "OPEN", str(wk)[:150])
+# 본사 매출
+s, hq = req("GET", f"/api/stl/hq/summary?period={today.strftime('%Y%m')}", tok("admin"))
+check("본사 매출 = 로열티 + 물류 이득", s == 200 and hq["hq_sales"] == hq["royalty"] + hq["logistics_margin"] and hq["logistics_revenue"] > 0, str(hq)[:150])
+check("owner1 본사 매출 접근 불가 (403)", req("GET", f"/api/stl/hq/summary?period={last_period}", tok("owner1"))[0] == 403)
+# 투자자 지급 (출자 비율로 이익 배분)
+s, po = req("GET", f"/api/stl/investor-payouts?period={last_period}", tok("hr"))
+gp = [x for x in po if x["store_id"] == GN] if s == 200 else []
+check("투자자 배분: 출자 비율 = 투자자 출자 ÷ 구성 총액", gp and abs(float(gp[0]["share_ratio"]) - gp[0]["investor_amount"] / gp[0]["store_total"]) < 1e-5, str(gp)[:160])
+check("지급액 결정 → 지급 완료", gp and req("PUT", "/api/stl/investor-payouts", tok("admin"), {"investorId": gp[0]["investor_id"], "storeId": GN, "period": last_period,
+      "decidedAmount": gp[0]["calculated_amount"], "status": "PAID", "memo": "스모크"})[0] == 200)
+s, mine = req("GET", "/api/stl/investor/me", tok("investor1"))
+check("투자자 화면: 배분 비율·지급 내역", s == 200 and mine[0].get("profit_share_ratio") and any(p["period"] == last_period for p in mine[0]["payouts"]))
+check("owner1 투자자 지급 접근 불가 (403)", req("GET", f"/api/stl/investor-payouts?period={last_period}", tok("owner1"))[0] == 403)
+s, pe = req("GET", f"/api/core/payroll/summary/employees?period={last_period}", tok("admin"))
+runs = req("GET", f"/api/core/payroll/summary?period={last_period}", tok("admin"))[1]["rows"]
+check("급여 전체: 그 달 모든 사이트 직원별 급여", s == 200 and pe and {x["store_name"] for x in pe} == {r["store_name"] for r in runs if r["headcount"] > 0}
+      and len(pe) == sum(r["headcount"] for r in runs), f"{len(pe)} / {sum(r['headcount'] for r in runs)}")
+
+section("11. 게이트웨이")
 check("웹 화면 응답", req("GET", "/login")[0] == 200)
 
 total = len(results); fails = [r for r in results if not r[0]]

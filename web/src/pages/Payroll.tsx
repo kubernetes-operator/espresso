@@ -56,6 +56,9 @@ function PayrollSummary() {
   const d = useApi<any>(`/api/core/payroll/summary${period ? `?period=${period}` : ''}`, [period])
   const rows: any[] = d.data?.rows ?? []
   const byPeriod = [...new Set(rows.map(r => r.period))]
+  const s = useSession()
+  const empPeriod = period || byPeriod[0]
+  const emps = useApi<any[]>(empPeriod && s.has('HQ_ADMIN', 'HR_MGR') ? `/api/core/payroll/summary/employees?period=${empPeriod}` : null, [empPeriod])
   const sum = (list: any[], k: string) => list.reduce((t, r) => t + Number(r[k] ?? 0), 0)
   return (
     <Page title="급여 · 전체" sub="사이트별 급여 지급 총액 (전체 화면에서는 계산·상신하지 않습니다 — 상단에서 매장을 고르세요)"
@@ -84,6 +87,19 @@ function PayrollSummary() {
         )
       })}
       {d.data && rows.length === 0 && <Empty>급여 실행이 없습니다.</Empty>}
+      {emps.data && emps.data.length > 0 && <section className="card table-wrap">
+        <h2>{empPeriod.slice(0, 4)}년 {Number(empPeriod.slice(4))}월 전체 직원 급여 ({emps.data.length}명)</h2>
+        <table className="tbl">
+          <thead><tr><th>사이트</th><th>사번</th><th>이름</th><th>직책</th><th>형태</th><th>등급</th><th className="num">근무(h)</th><th className="num">지급</th><th className="num">공제</th><th className="num">실지급</th><th className="num">사업자 부담</th><th>상태</th></tr></thead>
+          <tbody>{emps.data.map(p => (
+            <tr key={p.id}><td><small>{p.store_name}</small></td><td><code>{p.emp_no}</code></td><td><b>{p.name}</b></td><td><small>{p.job_title}</small></td><td>{EMP_TYPE[p.employment_type]}</td>
+              <td>{p.salary_grade ?? '—'}</td><td className="num">{Math.round(p.worked_minutes / 6) / 10}</td><td className="num">{won(p.gross_pay)}</td><td className="num">{won(p.total_deduction)}</td>
+              <td className="num"><b>{won(p.net_pay)}</b></td><td className="num">{won(p.employer_contrib)}</td><td><Badge tone={TONE[p.run_status]}>{PR_ST[p.run_status]}</Badge></td></tr>))}
+            <tr className="b"><td colSpan={7}><b>합계</b></td><td className="num"><b>{won(sum(emps.data, 'gross_pay'))}</b></td><td className="num">{won(sum(emps.data, 'total_deduction'))}</td>
+              <td className="num"><b>{won(sum(emps.data, 'net_pay'))}</b></td><td className="num">{won(sum(emps.data, 'employer_contrib'))}</td><td></td></tr>
+          </tbody>
+        </table>
+      </section>}
     </Page>
   )
 }

@@ -2,6 +2,9 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './styles.css'
+import { installTableSort, installRequiredCheck } from './components/enhance'
+installTableSort()
+installRequiredCheck()
 import { SessionProvider, useSession } from './session'
 import { AppShell } from './components/AppShell'
 import { Planned } from './components/ui'
@@ -39,6 +42,9 @@ import { AdminPayrollRates, AdminReportSections, AdminAccounts } from './pages/A
 import { AdminSalaryGrades } from './pages/AdminSalaryGrades'
 import { Schedule } from './pages/Schedule'
 import { Trends } from './pages/Trends'
+import { LogisticsTracking } from './pages/LogisticsTracking'
+import { Closing } from './pages/Closing'
+import { InvestorPayouts } from './pages/InvestorPayouts'
 
 function Guard({ children }: { children: React.ReactNode }) {
   const s = useSession()
@@ -72,6 +78,9 @@ function App() {
         <Route path="logistics" element={<Logistics />} />
         <Route path="logistics/new" element={<LogisticsNew />} />
         <Route path="logistics/board" element={<LogisticsBoard />} />
+        <Route path="logistics/tracking" element={<LogisticsTracking />} />
+        <Route path="closing" element={<Closing />} />
+        <Route path="investor-payouts" element={<InvestorPayouts />} />
         <Route path="logistics/:id" element={<LogisticsDetail />} />
         <Route path="approvals" element={<Approvals />} />
         <Route path="inventory" element={<Inventory />} />

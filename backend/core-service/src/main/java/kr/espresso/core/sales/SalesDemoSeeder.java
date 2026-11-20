@@ -30,7 +30,7 @@ public class SalesDemoSeeder implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         if (!enabled) return;
         if (db.sql("select count(*) from sales.daily_sales").query(Integer.class).single() > 0) { seedHistory(); return; }
-        CurrentUser admin = new CurrentUser(DemoIds.ADMIN, "admin", "최총괄", List.of(new RoleScope("HQ_ADMIN", "ALL", null)), null);
+        CurrentUser admin = new CurrentUser(DemoIds.ADMIN, "admin", "장총괄", List.of(new RoleScope("HQ_ADMIN", "ALL", null)), null);
         Object[][] stores = {{DemoIds.STORE_GANGNAM, 1_150_000L}, {DemoIds.STORE_HONGDAE, 880_000L}, {DemoIds.STORE_PANGYO, 1_020_000L}};
         Random rnd = new Random(42);
         LocalDate from = LocalDate.now().minusMonths(1).withDayOfMonth(1), to = LocalDate.now().minusDays(1);

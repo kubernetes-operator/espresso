@@ -22,6 +22,16 @@ public class SettlementDemoSeeder implements ApplicationRunner {
         if (!enabled) return;
         if (db.sql("select count(*) from stl.royalty_policy").query(Integer.class).single() == 0) seedRoyalty();
         if (db.sql("select count(*) from stl.investment_item").query(Integer.class).single() == 0) seedInvestment();
+        seedFunding();
+    }
+
+    /** 2차 점검 반영 데모 (가상): 강남 임차보증금을 투자자A 출자로 → 이익금 배분 비율 = 출자 / 구성 총액 */
+    void seedFunding() {
+        if (db.sql("select count(*) from stl.investment_item where funding_source = 'INVESTOR'").query(Integer.class).single() > 0) return;
+        db.sql("""
+                update stl.investment_item set funding_source = 'INVESTOR', description = '임차보증금 (투자자A 출자)',
+                  investor_id = (select id from stl.investor where user_id = ?)
+                where store_id = ? and category = 'DEPOSIT'""").params(DemoIds.INVESTOR1, DemoIds.STORE_GANGNAM).update();
     }
 
     void seedRoyalty() {
