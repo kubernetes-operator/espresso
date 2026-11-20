@@ -48,10 +48,12 @@ export function Investment() {
             {cur ? <section className="card">
               <div className="side-title"><b>{cur.store_name}</b><button className="small primary" onClick={() => setAdd({ storeId: cur.store_id })}>+ 투자 항목</button></div>
               <table className="tbl compact"><tbody>{cur.items.map((i: any) => <tr key={i.id}><td><small>{CAT[i.category]}</small><br />{i.description}<br /><small className="muted">{i.invested_on}{i.asset_id && ' · 설비 자산(감가상각)'}</small><br />
-                <select aria-label="자금 출처" className="mini" value={i.funding_source === 'INVESTOR' ? i.investor_id ?? '' : 'HQ'}
+                <select aria-label="자금 출처" className="mini" value={i.funding_source === 'INVESTOR' ? i.investor_id ?? 'UNASSIGNED' : 'HQ'}
                   onChange={e => run(() => api(`/api/stl/investments/${i.id}`, { method: 'PUT', body: e.target.value === 'HQ' ? { fundingSource: 'HQ' } : { fundingSource: 'INVESTOR', investorId: e.target.value } }), '자금 출처를 바꿨습니다')}>
                   <option value="HQ">본사 지원</option>
-                  {d.data.investors.map((v: any) => <option key={v.id} value={v.id}>투자자 출자 · {v.display_name}</option>)}</select></td>
+                  {i.funding_source === 'INVESTOR' && !i.investor_id && <option value="UNASSIGNED" disabled>투자자 출자 · 투자자 미지정 (지정 필요)</option>}
+                  {d.data.investors.map((v: any) => <option key={v.id} value={v.id}>투자자 출자 · {v.display_name}</option>)}</select>
+                {i.funding_source === 'INVESTOR' && !i.investor_id && <div className="small overdue">투자자를 지정해야 이익금 배분·지급에 포함됩니다</div>}</td>
                 <td className="num">{won(i.amount)}</td><td><button className="ghost small" aria-label="삭제" onClick={() => run(() => api(`/api/stl/investments/${i.id}`, { method: 'DELETE' }), '삭제했습니다')}>✕</button></td></tr>)}</tbody></table>
               <b>투자자 공개</b>
               {cur.disclosures.length === 0 && <p className="muted small">공개 설정 없음</p>}
