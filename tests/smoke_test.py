@@ -462,7 +462,50 @@ runs = req("GET", f"/api/core/payroll/summary?period={last_period}", tok("admin"
 check("급여 전체: 그 달 모든 사이트 직원별 급여", s == 200 and pe and {x["store_name"] for x in pe} == {r["store_name"] for r in runs if r["headcount"] > 0}
       and len(pe) == sum(r["headcount"] for r in runs), f"{len(pe)} / {sum(r['headcount'] for r in runs)}")
 
-section("11. 게이트웨이")
+section("11. 3차 사용자 점검 반영 (임대 계약 기간·수정, 임대 비용 수정, 주간 고정비, 직원 이름 → 계정)")
+s, ls = req("GET", f"/api/core/stores/{GN}/leases", tok("owner1"))
+check("임대 계약 조회", s == 200 and ls, str(ls)[:100])
+check("임대 계약: 종료일 없으면 거부 (400)", req("POST", f"/api/core/stores/{GN}/leases", tok("admin"), {"monthlyRent": 1, "startDate": "2030-01-01"})[0] == 400)
+check("임대 계약: 기간 겹치면 거부 (409)", req("POST", f"/api/core/stores/{GN}/leases", tok("admin"), {"monthlyRent": 1, "startDate": "2026-06-01", "endDate": "2026-12-31"})[0] == 409)
+L = ls[0]
+body = {"lessorName": L.get("lessor_name"), "deposit": L["deposit"], "monthlyRent": L["monthly_rent"], "maintenanceFee": L["maintenance_fee"] + 10000,
+        "rentVatType": L["rent_vat_type"], "paymentDay": L["payment_day"], "startDate": str(L["start_date"])[:10], "endDate": str(L["end_date"])[:10]}
+check("임대 계약 수정 (관리비)", req("PUT", f"/api/core/stores/leases/{L['id']}", tok("owner1"), body)[0] == 200
+      and req("GET", f"/api/core/stores/{GN}/leases", tok("owner1"))[1][0]["maintenance_fee"] == L["maintenance_fee"] + 10000)
+body["maintenanceFee"] = L["maintenance_fee"]; req("PUT", f"/api/core/stores/leases/{L['id']}", tok("owner1"), body)
+check("mgr1 임대 계약 수정 불가 (403)", req("PUT", f"/api/core/stores/leases/{L['id']}", tok("mgr1"), body)[0] == 403)
+check("임대 비용: 기간 없으면 거부 (400)", req("POST", "/api/stl/expenses", tok("owner1"), {"storeId": GN, "expenseKind": "RENT", "accountCode": "819", "amount": 100000, "amountMode": "EXCLUSIVE"})[0] == 400)
+s, ex = req("POST", "/api/stl/expenses", tok("owner1"), {"storeId": GN, "expenseKind": "RENT", "accountCode": "837", "amount": 100000, "amountMode": "EXCLUSIVE",
+    "usageFrom": today.replace(day=1).isoformat(), "usageTo": today.isoformat(), "vendorName": "스모크 관리비"})
+check("임대 비용 작성(기간) → 수정", s == 200 and req("PUT", f"/api/stl/expenses/{ex['id']}", tok("owner1"), {"amount": 120000, "amountMode": "EXCLUSIVE",
+      "usageFrom": today.replace(day=1).isoformat(), "usageTo": today.isoformat()})[0] == 200)
+req("POST", f"/api/stl/expenses/{ex.get('id')}/cancel", tok("owner1"), {})
+req("POST", "/api/stl/expenses/recurring", tok("owner1"), {"storeId": GN, "month": cur_month})
+rents = [x for x in req("GET", f"/api/stl/expenses?storeId={GN}&month={cur_month}", tok("owner1"))[1] if (x.get("memo") or "").startswith("정기:") and x["status"] == "APPROVED"]
+if rents:
+    r0 = rents[0]
+    s, up = req("PUT", f"/api/stl/expenses/{r0['id']}", tok("owner1"), {"amount": r0["supply_amount"] + 1000, "amountMode": "EXCLUSIVE",
+        "usageFrom": str(r0["usage_from"])[:10] if r0.get("usage_from") else today.replace(day=1).isoformat(), "usageTo": str(r0["usage_to"])[:10] if r0.get("usage_to") else today.isoformat()})
+    check("승인된 월세·관리비 수정 → 역분개 후 다시 반영", s == 200 and up.get("reposted") is True, str(up)[:100])
+    req("PUT", f"/api/stl/expenses/{r0['id']}", tok("owner1"), {"amount": r0["supply_amount"], "amountMode": "EXCLUSIVE",
+        "usageFrom": str(r0["usage_from"])[:10] if r0.get("usage_from") else today.replace(day=1).isoformat(), "usageTo": str(r0["usage_to"])[:10] if r0.get("usage_to") else today.isoformat()})
+else:
+    check("승인된 월세·관리비 수정 (정기 비용 없음 → 건너뜀)", True)
+s, wk = req("GET", f"/api/stl/settlement/weeks?storeId={GN}&month={cur_month}", tok("owner1"))
+w0 = wk["weeks"][-1] if s == 200 else {}
+import calendar
+ws = datetime.date.fromisoformat(w0.get("week_start", today.isoformat()))
+exp_rent = round(sum((L["monthly_rent"] + L["maintenance_fee"]) / calendar.monthrange(d.year, d.month)[1] for d in (ws + datetime.timedelta(days=i) for i in range(7))))
+check("주간 결산: 임대·관리비 = 월 금액 일할 × 7일", abs(w0.get("rent", 0) - exp_rent) <= 1 and w0.get("depreciation", 0) > 0, f"{w0.get('rent')} vs {exp_rent}")
+# 직원 이름 → 계정 이름
+s, emps = req("GET", f"/api/core/hr/employees?storeId={GN}", tok("hr"))
+st1 = [x for x in emps if x["name"] == "강사원"][0]
+check("직원 이름 수정", req("PUT", f"/api/core/hr/employees/{st1['id']}", tok("hr"), {"name": "강사원2"})[0] == 200)
+s, us = req("GET", "/api/auth/users", tok("admin"))
+check("계정·등급 이름도 함께 바뀜", any(u["loginId"] == "staff1" and u["name"] == "강사원2" for u in us))
+req("PUT", f"/api/core/hr/employees/{st1['id']}", tok("hr"), {"name": "강사원"})
+
+section("12. 게이트웨이")
 check("웹 화면 응답", req("GET", "/login")[0] == 200)
 
 total = len(results); fails = [r for r in results if not r[0]]

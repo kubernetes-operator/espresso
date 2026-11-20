@@ -4,7 +4,7 @@ import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast } from '../components/ui'
 import { ApprovalPanel, Timeline, Comments } from '../components/DocPanels'
 import { useSession } from '../session'
-import { won, dt, day, DIVISIONS } from '../format'
+import { won, dt, day, DIVISIONS, num } from '../format'
 import { LR_STATUS, LR_TONE } from './logisticsShared'
 
 export function LogisticsDetail() {
@@ -201,7 +201,7 @@ function AdjustModal({ line, onClose, onSubmit }: any) {
   return (
     <Modal title={`단가·수량 조정 · ${line.item_name}`} onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ unitPrice: Number(price), qty: Number(qty) }) }}>
-        <label htmlFor="aj-p">단가 (공급가)</label><input id="aj-p" inputMode="numeric" value={price} onChange={e => setPrice(e.target.value.replace(/\D/g, ''))} />
+        <label htmlFor="aj-p">단가 (공급가)</label><input id="aj-p" inputMode="numeric" value={num(price)} onChange={e => setPrice(e.target.value.replace(/\D/g, ''))} />
         <label htmlFor="aj-q">수량</label><input id="aj-q" inputMode="decimal" value={qty} onChange={e => setQty(e.target.value)} />
         <p className="muted small">매장 할인 조건은 그대로 다시 적용됩니다. 조정 내역은 이력에 남습니다.</p>
         <button className="primary">조정</button>

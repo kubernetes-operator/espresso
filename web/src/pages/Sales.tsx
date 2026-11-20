@@ -3,7 +3,7 @@ import { api } from '../api'
 import { prepareUpload, fmtSize, UPLOAD_LIMIT } from '../upload'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast, Empty } from '../components/ui'
 import { useSession } from '../session'
-import { won } from '../format'
+import { won, num } from '../format'
 
 const thisMonth = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7)
 
@@ -89,7 +89,7 @@ function SalesModal({ storeId, row, onClose, onDone }: any) {
     } catch (e: any) { setErr(e.message) }
   }
   const field = (k: string, label: string) => (
-    <div><label htmlFor={`sm-${k}`}>{label}</label><input id={`sm-${k}`} inputMode="numeric" value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>)
+    <div><label htmlFor={`sm-${k}`}>{label}</label><input id={`sm-${k}`} inputMode="numeric" value={num(f[k])} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>)
   return (
     <Modal title="일 매출 입력" onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); save(false) }}>

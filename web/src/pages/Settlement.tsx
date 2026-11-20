@@ -140,20 +140,20 @@ function WeekView({ month, setMonth, storeId, name, setView }: any) {
       <ErrorBox error={d.error} />
       <div className="card table-wrap">
         <table className="tbl">
-          <thead><tr><th>주</th><th>상태</th><th className="num">순매출</th><th className="num">매출원가</th><th className="num">매출총이익</th><th className="num">인건비</th><th className="num">임대·공과금</th><th className="num">운영·소모·손실</th><th className="num">감가상각</th><th className="num">영업이익</th><th>마감 시각</th></tr></thead>
+          <thead><tr><th>주</th><th>상태</th><th className="num">순매출</th><th className="num">매출원가</th><th className="num">매출총이익</th><th className="num">인건비</th><th className="num">임대·관리비(일할)</th><th className="num">공과금</th><th className="num">운영·소모·손실</th><th className="num">감가상각(일할)</th><th className="num">영업이익</th><th>마감 시각</th></tr></thead>
           <tbody>{ws.map(w => (
             <tr key={w.week_start}>
               <td><b>{w.week_start.slice(5)} ~ {w.week_end.slice(5)}</b></td>
               <td><Badge tone={ST[w.status][1]}>{ST[w.status][0]}</Badge></td>
               <td className="num">{won(w.net_sales)}</td><td className="num">{won(w.cogs)}</td><td className="num">{won(w.gross_profit)}</td>
-              <td className="num">{won(w.labor)}</td><td className="num">{won((w.rent ?? 0) + (w.utility ?? 0))}</td>
+              <td className="num">{won(w.labor)}</td><td className="num">{won(w.rent)}</td><td className="num">{won(w.utility)}</td>
               <td className="num">{won((w.operating_exp ?? 0) + (w.internal_use ?? 0) + (w.stock_loss ?? 0))}</td><td className="num">{won(w.depreciation)}</td>
               <td className="num"><b>{won(w.operating_profit)}</b></td>
               <td><small>{w.closed_at ? new Date(w.closed_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '—'}</small></td>
             </tr>))}</tbody>
         </table>
       </div>
-      <p className="muted small">주 마감은 그 주의 분개(매출·물류 입고·비용·급여 등 발생일 기준)를 모은 확정 실적입니다. 급여·임대료처럼 월말에 잡히는 비용은 그 날짜가 속한 주에 들어가고, 로열티는 월 마감에서 계산합니다.</p>
+      <p className="muted small">주 마감은 그 주의 분개(매출·물류 입고·비용·급여 등 발생일 기준)를 모은 확정 실적입니다. <b>임대료·관리비·감가상각은 고정비라 월 금액을 날짜별로 나눠(일할) 그 주 일수만큼 넣습니다</b> (임대 계약 기준). 급여는 확정된 날이 속한 주에, 로열티는 월 마감에서 계산합니다.</p>
     </Page>
   )
 }

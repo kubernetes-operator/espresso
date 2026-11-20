@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
-import { won } from '../format'
+import { won, num } from '../format'
 
 const CAT: Record<string, string> = { INTERIOR: '인테리어', EQUIPMENT: '설비', DEPOSIT: '임차보증금', PREMIUM: '권리금', INITIAL_STOCK: '초도 물품', OTHER: '기타' }
 const SRC: Record<string, string> = { INVESTOR: '투자자 출자', HQ: '본사 지원' }
@@ -79,7 +79,7 @@ function AddModal({ storeId, investors, onClose, onSubmit }: any) {
         <label htmlFor="iv-src">자금 출처</label><select id="iv-src" value={f.fundingSource} onChange={e => setF({ ...f, fundingSource: e.target.value })}>
           <option value="HQ">본사 지원</option>{investors.map((v: any) => <option key={v.id} value={v.id}>투자자 출자 · {v.display_name}</option>)}</select>
         <label htmlFor="iv-desc">내용</label><input id="iv-desc" required value={f.description} onChange={e => setF({ ...f, description: e.target.value })} />
-        <label htmlFor="iv-amt">금액</label><input id="iv-amt" required inputMode="numeric" value={f.amount} onChange={e => setF({ ...f, amount: e.target.value.replace(/\D/g, '') })} />
+        <label htmlFor="iv-amt">금액</label><input id="iv-amt" required inputMode="numeric" value={num(f.amount)} onChange={e => setF({ ...f, amount: e.target.value.replace(/\D/g, '') })} />
         <label htmlFor="iv-date">일자</label><input id="iv-date" required type="date" value={f.investedOn} onChange={e => setF({ ...f, investedOn: e.target.value })} />
         <button className="primary">추가</button>
       </form>
@@ -106,7 +106,7 @@ function DiscModal({ data, users, storeId, onClose, run }: any) {
         </details>
         <label htmlFor="ds-store">매장</label><select id="ds-store" value={store} onChange={e => setStore(e.target.value)}>{data.stores.map((s: any) => <option key={s.store_id} value={s.store_id}>{s.store_name} (구성 총액 {won(s.total)})</option>)}</select>
         <label htmlFor="ds-mode">공개 방식</label><select id="ds-mode" value={mode} onChange={e => setMode(e.target.value)}>{Object.entries(MODE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
-        {mode === 'FIXED_AMOUNT' && <><label htmlFor="ds-fixed">공개 금액</label><input id="ds-fixed" inputMode="numeric" value={fixed} onChange={e => setFixed(e.target.value.replace(/\D/g, ''))} /></>}
+        {mode === 'FIXED_AMOUNT' && <><label htmlFor="ds-fixed">공개 금액</label><input id="ds-fixed" inputMode="numeric" value={num(fixed)} onChange={e => setFixed(e.target.value.replace(/\D/g, ''))} /></>}
         {mode === 'RATIO' && <><label htmlFor="ds-ratio">지분 비율 (%)</label><input id="ds-ratio" inputMode="decimal" value={ratio} onChange={e => setRatio(e.target.value)} /></>}
         <label className="switch"><input type="checkbox" checked={show} onChange={e => setShow(e.target.checked)} /><span>결산액·회수율도 공개 (비율 반영)</span></label>
         <button className="primary" disabled={!investorId} onClick={() => { run(() => api('/api/stl/investor-disclosures', { body: { investorId, storeId: store, mode, fixedAmount: fixed ? Number(fixed) : null, ratio: ratio ? Number(ratio) / 100 : null, showSettlement: show } }), '공개 설정을 저장했습니다'); onClose() }}>저장</button>

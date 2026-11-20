@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, ErrorBox, Toast, Modal } from '../components/ui'
-import { won } from '../format'
+import { won, num } from '../format'
 
 /** 연봉 테이블: 직급군(접두어) × 20단계. 금액을 바꾸면 그 등급 직원의 현재 계약 월급에 바로 반영 */
 export function AdminSalaryGrades() {
@@ -36,7 +36,7 @@ export function AdminSalaryGrades() {
             <tr key={g.code}>
               <td><code>{g.code}</code></td><td>{g.step}단계</td>
               <td className="num">{edit[g.code] !== undefined
-                ? <input aria-label={`${g.code} 연봉`} inputMode="numeric" style={{ width: 150, textAlign: 'right' }} value={edit[g.code]} onChange={e => setEdit({ ...edit, [g.code]: e.target.value.replace(/\D/g, '') })} />
+                ? <input aria-label={`${g.code} 연봉`} inputMode="numeric" style={{ width: 150, textAlign: 'right' }} value={num(edit[g.code])} onChange={e => setEdit({ ...edit, [g.code]: e.target.value.replace(/\D/g, '') })} />
                 : won(g.annual_salary)}</td>
               <td className="num">{won(edit[g.code] !== undefined ? Math.floor(Number(edit[g.code]) / 12) : g.monthly)}</td>
               <td className="nowrap">{edit[g.code] !== undefined
@@ -72,10 +72,10 @@ function RuleCard({ rule, onDone, onErr }: any) {
       <form className="form" onSubmit={e => { e.preventDefault(); apply() }}>
         <b>{rule.group_name} ({rule.grade_group}1~{rule.grade_group}20) 단계 규칙</b>
         <div className="row">
-          <div><label htmlFor="rule-base">1단계 {monthly ? '월 금액' : '연봉'} (원)</label><input id="rule-base" required inputMode="numeric" value={base} onChange={e => setBase(e.target.value.replace(/\D/g, ''))} /></div>
+          <div><label htmlFor="rule-base">1단계 {monthly ? '월 금액' : '연봉'} (원)</label><input id="rule-base" required inputMode="numeric" value={num(base)} onChange={e => setBase(e.target.value.replace(/\D/g, ''))} /></div>
           <div><label htmlFor="rule-mode">상승 방식</label><select id="rule-mode" value={mode} onChange={e => setMode(e.target.value as any)}><option value="rate">상승률 (%) — 단계마다 복리</option><option value="inc">증가액 (원) — 단계마다 같은 금액</option></select></div>
           {mode === 'rate' ? <div><label htmlFor="rule-rate">단계별 상승률 (%)</label><input id="rule-rate" required inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} /></div>
-            : <div><label htmlFor="rule-inc">단계별 증가액 (원)</label><input id="rule-inc" required inputMode="numeric" value={inc} onChange={e => setInc(e.target.value.replace(/\D/g, ''))} /></div>}
+            : <div><label htmlFor="rule-inc">단계별 증가액 (원)</label><input id="rule-inc" required inputMode="numeric" value={num(inc)} onChange={e => setInc(e.target.value.replace(/\D/g, ''))} /></div>}
         </div>
         <p className="muted small">미리보기: 1단계 {won(preview(1))} · 5단계 {won(Math.round(preview(5) / 1000) * 1000)} · 10단계 {won(Math.round(preview(10) / 1000) * 1000)} · 20단계 {won(Math.round(preview(20) / 1000) * 1000)}원{monthly ? ' (월)' : ''} — 1,000원 단위 반올림</p>
         <button className="primary">20단계 다시 작성</button>
@@ -100,8 +100,8 @@ function AddGroup({ onClose, onDone }: any) {
           <div><label htmlFor="sg-n">직급군 이름</label><input id="sg-n" required value={f.name} placeholder="예: 베이커" onChange={e => setF({ ...f, name: e.target.value })} /></div>
         </div>
         <div className="row">
-          <div><label htmlFor="sg-b">1단계 연봉 (원)</label><input id="sg-b" required inputMode="numeric" value={f.base} onChange={e => setF({ ...f, base: e.target.value.replace(/\D/g, '') })} /></div>
-          <div><label htmlFor="sg-i">단계별 인상액 (원)</label><input id="sg-i" inputMode="numeric" value={f.increment} onChange={e => setF({ ...f, increment: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="sg-b">1단계 연봉 (원)</label><input id="sg-b" required inputMode="numeric" value={num(f.base)} onChange={e => setF({ ...f, base: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="sg-i">단계별 인상액 (원)</label><input id="sg-i" inputMode="numeric" value={num(f.increment)} onChange={e => setF({ ...f, increment: e.target.value.replace(/\D/g, '') })} /></div>
         </div>
         {f.base && <p className="muted small">20단계 연봉 = {won(Number(f.base) + 19 * Number(f.increment || 0))}원. 만든 뒤 단계별로 고칠 수 있습니다.</p>}
         {err && <div className="error-box">{err}</div>}

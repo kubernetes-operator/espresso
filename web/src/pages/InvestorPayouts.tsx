@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Empty, Modal } from '../components/ui'
-import { won, dt } from '../format'
+import { won, dt, num } from '../format'
 
 const lastMonth = () => { const d = new Date(Date.now() + 9 * 3600e3); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 7) }
 
@@ -61,7 +61,7 @@ function DecideModal({ row, period, onClose, onDone }: any) {
       <form className="form" onSubmit={e => { e.preventDefault(); save('DECIDED') }}>
         <p className="small">결산액 {won(row.profit)}원 × 출자 비율 {(Number(row.share_ratio) * 100).toFixed(2)}% = 계산 배분액 <b>{won(row.calculated_amount)}원</b></p>
         <label htmlFor="po-amt">지급액 (원)</label>
-        <input id="po-amt" required inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ''))} />
+        <input id="po-amt" required inputMode="numeric" value={num(amount)} onChange={e => setAmount(e.target.value.replace(/\D/g, ''))} />
         <label htmlFor="po-memo">메모</label><input id="po-memo" value={memo} placeholder="예: 운영 유보금 10% 차감" onChange={e => setMemo(e.target.value)} />
         {err && <div className="error-box">{err}</div>}
         <div className="act-buttons"><button>지급액 결정</button><button type="button" className="primary" onClick={e => { const f = (e.target as HTMLElement).closest('form'); if (f && !f.reportValidity()) return; save('PAID') }}>지급 완료</button></div>

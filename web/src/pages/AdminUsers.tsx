@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
 import { useSession } from '../session'
-import { ROLE_NAMES, SITE_TYPES, HQ_SITE, won, dt } from '../format'
+import { ROLE_NAMES, SITE_TYPES, HQ_SITE, won, dt, num } from '../format'
 
 type Asg = { id: string; role: string; roleName: string; roleActive: boolean; scopeType: string; scopeId: string | null; line: string }
 type U = { id: string; loginId: string; name: string; status: string; vatOverride: string | null; lastLoginAt: string | null; initialPassword: boolean; suspendedAt: string | null; assignments: Asg[] }
@@ -186,7 +186,7 @@ function CreateUser({ isAdmin, stores, regions, defaultSite, onClose, onDone }: 
               <select id="ne-type" value={emp.employmentType} onChange={e => setEmp({ ...emp, employmentType: e.target.value, salaryGrade: '' })}>
                 <option value="REGULAR">정규직</option><option value="CONTRACT">계약직</option>{role === 'STAFF' && <option value="PART_TIME">아르바이트(시급)</option>}<option value="FREELANCER">프리랜서(3.3%)</option>
               </select></div>
-            {hourly ? <div><label htmlFor="ne-wage">시급 (원)</label><input id="ne-wage" required inputMode="numeric" value={emp.baseWage} onChange={e => setEmp({ ...emp, baseWage: e.target.value.replace(/\D/g, '') })} /></div>
+            {hourly ? <div><label htmlFor="ne-wage">시급 (원)</label><input id="ne-wage" required inputMode="numeric" value={num(emp.baseWage)} onChange={e => setEmp({ ...emp, baseWage: e.target.value.replace(/\D/g, '') })} /></div>
               : <div><label htmlFor="ne-grade">연봉 등급</label>
                 <select id="ne-grade" required value={emp.salaryGrade} onChange={e => setEmp({ ...emp, salaryGrade: e.target.value })}>
                   <option value="">선택</option>

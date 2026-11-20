@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
 import { useSession } from '../session'
-import { won, DIVISIONS } from '../format'
+import { won, DIVISIONS, num } from '../format'
 
 export function AdminCatalog() {
   const s = useSession()
@@ -92,7 +92,7 @@ function ThresholdModal({ cats, onClose, onDone }: any) {
         <p className="small muted">기준가(VAT 제외)가 이 금액 이상인 품목은 재고가 아니라 비품(자산)으로 입고되어 5년 정액 감가상각됩니다. 비우면 기준 없음. 설비 카테고리는 항상 자산입니다.</p>
         <div className="table-wrap" style={{ maxHeight: 360 }}><table className="tbl compact"><tbody>
           {shown.map((c: any) => <tr key={c.id}><td><small>{c.division_name}</small> · {c.name}</td>
-            <td><input aria-label={`${c.name} 기준 단가`} inputMode="numeric" placeholder="없음" value={vals[c.id] ?? ''} onChange={e => setVals({ ...vals, [c.id]: e.target.value.replace(/\D/g, '') })} /></td></tr>)}
+            <td><input aria-label={`${c.name} 기준 단가`} inputMode="numeric" placeholder="없음" value={num(vals[c.id] ?? '')} onChange={e => setVals({ ...vals, [c.id]: e.target.value.replace(/\D/g, '') })} /></td></tr>)}
         </tbody></table></div>
         <label className="switch"><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} /><span>다른 카테고리도 보기</span></label>
         {err && <div className="error-box">{err}</div>}
@@ -143,8 +143,8 @@ function ItemModal({ item, cats, onClose, onDone }: any) {
           <div><label htmlFor="it-tax">과세</label><select id="it-tax" value={f.taxType} onChange={e => setF({ ...f, taxType: e.target.value })}><option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
         </div>
         <div className="row">
-          <div><label htmlFor="it-cost">본사 매입가 (공급가)</label><input id="it-cost" inputMode="numeric" value={f.hqCost} placeholder="비공개 · 물류 관리자 이상" onChange={e => setF({ ...f, hqCost: e.target.value.replace(/\D/g, '') })} /></div>
-          <div><label htmlFor="it-price">본사 기준가 (매장 공급가)</label><input id="it-price" required inputMode="numeric" value={f.basePrice} onChange={e => setF({ ...f, basePrice: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="it-cost">본사 매입가 (공급가)</label><input id="it-cost" inputMode="numeric" value={num(f.hqCost)} placeholder="비공개 · 물류 관리자 이상" onChange={e => setF({ ...f, hqCost: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="it-price">본사 기준가 (매장 공급가)</label><input id="it-price" required inputMode="numeric" value={num(f.basePrice)} onChange={e => setF({ ...f, basePrice: e.target.value.replace(/\D/g, '') })} /></div>
         </div>
         {!isNew && <label className="switch"><input type="checkbox" checked={f.isActive} onChange={e => setF({ ...f, isActive: e.target.checked })} /><span>요청 가능</span></label>}
         {err && <div className="error-box">{err}</div>}
@@ -200,7 +200,7 @@ function PriceModal({ item, storeId, storeName, onClose, onDone }: any) {
     <Modal title={`${storeName} 단가 · ${item.name}`} onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
         <p className="muted small">본사 기준가 {won(item.base_price)}원. 비워 두면 기준가를 씁니다.</p>
-        <label htmlFor="sp-p">매장 단가 (공급가)</label><input id="sp-p" inputMode="numeric" value={unitPrice} onChange={e => setUnitPrice(e.target.value.replace(/\D/g, ''))} placeholder={String(item.base_price)} />
+        <label htmlFor="sp-p">매장 단가 (공급가)</label><input id="sp-p" inputMode="numeric" value={num(unitPrice)} onChange={e => setUnitPrice(e.target.value.replace(/\D/g, ''))} placeholder={String(item.base_price)} />
         <div className="row">
           <div><label htmlFor="sp-t">할인</label><select id="sp-t" value={dType} onChange={e => setDType(e.target.value)}><option value="">없음</option><option value="RATE">비율 (%)</option><option value="AMOUNT">단위당 금액 (원)</option></select></div>
           {dType && <div><label htmlFor="sp-v">{dType === 'RATE' ? '할인율 %' : '할인액 원'}</label><input id="sp-v" inputMode="decimal" value={dVal} onChange={e => setDVal(e.target.value)} /></div>}

@@ -57,7 +57,8 @@ export function AppShell() {
             <div key={g} className="nav-group">
               <div className="nav-group-label">{g}</div>
               {menu.filter(m => m.group === g).map(m => (
-                <NavLink key={m.path} to={m.path} end={m.path === '/'} className="nav-item" title={`${m.label} — ${m.desc}`}>
+                <NavLink key={m.path} to={m.path} end={m.path === '/'} title={`${m.label} — ${m.desc}`}
+                  className={() => `nav-item ${cur?.path === m.path ? 'active' : ''}`}>
                   <span className="nav-icon" aria-hidden>{m.icon}</span><span className="nav-label">{m.label}</span>
                   {m.path === '/approvals' && pending > 0 && <span className="count">{pending}</span>}
                 </NavLink>

@@ -111,8 +111,13 @@ public class HrController {
         CurrentUser u = CurrentUser.get();
         var e = db.sql("select store_id from hr.employee where id = ?").param(id).query(UUID.class).single();
         scope.requireRoleOn(u, e, MANAGE);
+        var cur = db.sql("select name, user_id from hr.employee where id = ?").param(id).query().singleRow();
         db.sql("update hr.employee set name = coalesce(cast(? as varchar), name), status = coalesce(cast(? as varchar), status), resign_date = cast(? as date), user_id = coalesce(cast(? as uuid), user_id), job_title = coalesce(cast(? as varchar), job_title), updated_at = now() where id = ?")
                 .params(r.name(), r.status(), blank(r.resignDate()), r.userId(), r.jobTitle(), id).update();
+        // 이름을 바꾸면 연결된 계정 이름도 같이 (계정·등급, 조직도에 반영)
+        UUID linked = r.userId() != null ? r.userId() : (UUID) cur.get("user_id");
+        if (linked != null && r.name() != null && !r.name().isBlank() && !r.name().trim().equals(cur.get("name")))
+            auth.rename(linked, r.name().trim());
         if (r.baseWage() != null || (r.salaryGrade() != null && !r.salaryGrade().isBlank())) {
             LocalDate from = LocalDate.now();
             db.sql("delete from hr.employment_contract where employee_id = ? and valid_from = ? and not exists (select 1 from hr.payslip p where p.contract_id = hr.employment_contract.id)").params(id, from).update();

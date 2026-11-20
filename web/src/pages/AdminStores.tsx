@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
 import { useSession } from '../session'
-import { SITE_TYPES } from '../format'
+import { SITE_TYPES, won, num } from '../format'
 
 export function AdminStores() {
   const s = useSession()
@@ -11,6 +11,7 @@ export function AdminStores() {
   const list = useApi<any[]>('/api/core/stores')
   const regions = useApi<any[]>('/api/core/regions')
   const [addRegion, setAddRegion] = useState<any>(null)
+  const [leaseFor, setLeaseFor] = useState<any>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -29,7 +30,7 @@ export function AdminStores() {
           <tbody>
             {(list.data ?? []).map(st => (
               <tr key={st.id}>
-                <td><b>{st.name}</b> <code>{st.code}</code></td>
+                <td><b>{st.name}</b> <code>{st.code}</code>{st.site_type !== 'HQ' && <><br /><button className="ghost small" onClick={() => setLeaseFor(st)}>임대 계약</button></>}</td>
                 <td><Badge tone={st.site_type === 'BAKERY' ? 'info' : st.site_type === 'HQ' ? 'accent' : 'neutral'}>{SITE_TYPES[st.site_type ?? 'STORE']}</Badge></td>
                 <td>{st.site_type === 'HQ' ? '—' : <select aria-label="권역" value={st.region_id ?? ''} onChange={e => save(st.id, { regionId: e.target.value }, `${st.name} 권역을 바꿨습니다`)}>
                   <option value="" disabled>선택</option>
@@ -69,6 +70,7 @@ export function AdminStores() {
                 onClick={async () => { setErr(null); try { await api(`/api/core/regions/${r.id}`, { method: 'DELETE' }); setMsg('권역을 지웠습니다'); regions.reload() } catch (e: any) { setErr(e.message) } }}>×</button>}</span>))}
         </div>
       </section>
+      {leaseFor && <LeaseModal store={leaseFor} onClose={() => setLeaseFor(null)} onMsg={setMsg} />}
       {addRegion && <RegionModal regions={regions.data ?? []} onClose={() => setAddRegion(null)} onDone={() => { setAddRegion(null); setMsg('권역을 추가했습니다'); regions.reload() }} />}
       <Toast msg={msg} onDone={() => setMsg(null)} />
     </Page>
@@ -95,6 +97,65 @@ function RegionModal({ regions, onClose, onDone }: any) {
         {err && <div className="error-box">{err}</div>}
         <button className="primary">추가</button>
       </form>
+    </Modal>
+  )
+}
+
+/** 임대 계약: 기간(시작·종료) 필수, 수정 가능. 월세·관리비 정기 비용과 주간 결산 고정비(일할)에 쓰임 */
+function LeaseModal({ store, onClose, onMsg }: any) {
+  const list = useApi<any[]>(`/api/core/stores/${store.id}/leases`)
+  const [edit, setEdit] = useState<any>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const blank = { lessorName: '', deposit: '', monthlyRent: '', maintenanceFee: '', rentVatType: 'TAXABLE', paymentDay: '25', startDate: '', endDate: '', memo: '' }
+  const [f, setF] = useState<Record<string, string>>(blank)
+  const open = (l: any) => {
+    setErr(null)
+    setEdit(l ?? {})
+    setF(l ? { lessorName: l.lessor_name ?? '', deposit: String(l.deposit), monthlyRent: String(l.monthly_rent), maintenanceFee: String(l.maintenance_fee), rentVatType: l.rent_vat_type,
+      paymentDay: String(l.payment_day ?? ''), startDate: String(l.start_date).slice(0, 10), endDate: l.end_date ? String(l.end_date).slice(0, 10) : '', memo: l.memo ?? '' } : blank)
+  }
+  const save = async () => {
+    setErr(null)
+    const body = { ...f, deposit: Number(f.deposit || 0), monthlyRent: Number(f.monthlyRent || 0), maintenanceFee: Number(f.maintenanceFee || 0), paymentDay: f.paymentDay ? Number(f.paymentDay) : null }
+    try {
+      if (edit.id) await api(`/api/core/stores/leases/${edit.id}`, { method: 'PUT', body }); else await api(`/api/core/stores/${store.id}/leases`, { body })
+      onMsg('임대 계약을 저장했습니다'); setEdit(null); list.reload()
+    } catch (e: any) { setErr(e.message) }
+  }
+  const del = async (l: any) => {
+    if (!confirm('이 임대 계약을 지울까요? 이미 만든 월세·관리비 비용은 그대로 남습니다.')) return
+    try { await api(`/api/core/stores/leases/${l.id}`, { method: 'DELETE' }); list.reload() } catch (e: any) { setErr(e.message) }
+  }
+  const money = (k: string, l: string, req = false) => <div><label htmlFor={`ls-${k}`}>{l}</label><input id={`ls-${k}`} required={req} inputMode="numeric" value={num(f[k])} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>
+  return (
+    <Modal title={`${store.name} 임대 계약`} onClose={onClose} wide>
+      {err && <div className="error-box">{err}</div>}
+      {!edit ? <>
+        <div className="table-wrap"><table className="tbl compact">
+          <thead><tr><th>기간</th><th>임대인</th><th className="num">보증금</th><th className="num">월세</th><th className="num">관리비</th><th>과세</th><th>납부일</th><th></th></tr></thead>
+          <tbody>{(list.data ?? []).map(l => (
+            <tr key={l.id}><td>{String(l.start_date).slice(0, 10)} ~ {l.end_date ? String(l.end_date).slice(0, 10) : <span className="overdue">종료일 없음</span>}</td><td>{l.lessor_name ?? '—'}</td>
+              <td className="num">{won(l.deposit)}</td><td className="num">{won(l.monthly_rent)}</td><td className="num">{won(l.maintenance_fee)}</td>
+              <td>{l.rent_vat_type === 'EXEMPT' ? '면세' : '과세'}</td><td>{l.payment_day ?? '—'}일</td>
+              <td className="nowrap"><button className="ghost small" onClick={() => open(l)}>수정</button><button className="ghost small" onClick={() => del(l)}>삭제</button></td></tr>))}</tbody>
+        </table></div>
+        {list.data?.length === 0 && <p className="muted small">임대 계약이 없습니다.</p>}
+        <p className="muted small">월세·관리비는 공급가(VAT 제외)입니다. 비용 화면의 [월세·관리비 생성]과 결산 주 마감의 고정비(일할 배분)가 이 계약을 씁니다. 계약이 바뀌면 기존 계약 종료일을 바꾸고 새 계약을 추가하세요.</p>
+        <button className="primary" onClick={() => open(null)}>+ 임대 계약</button>
+      </> : <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
+        <div className="row">
+          <div><label htmlFor="ls-start">계약 시작일</label><input id="ls-start" required type="date" value={f.startDate} onChange={e => setF({ ...f, startDate: e.target.value })} /></div>
+          <div><label htmlFor="ls-end">계약 종료일</label><input id="ls-end" required type="date" value={f.endDate} onChange={e => setF({ ...f, endDate: e.target.value })} /></div>
+          <div><label htmlFor="ls-lessor">임대인</label><input id="ls-lessor" value={f.lessorName} onChange={e => setF({ ...f, lessorName: e.target.value })} /></div>
+        </div>
+        <div className="row">{money('deposit', '보증금')}{money('monthlyRent', '월세 (공급가)', true)}{money('maintenanceFee', '관리비 (공급가)')}</div>
+        <div className="row">
+          <div><label htmlFor="ls-vat">과세</label><select id="ls-vat" value={f.rentVatType} onChange={e => setF({ ...f, rentVatType: e.target.value })}><option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
+          <div><label htmlFor="ls-day">납부일</label><input id="ls-day" inputMode="numeric" value={f.paymentDay} onChange={e => setF({ ...f, paymentDay: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="ls-memo">메모</label><input id="ls-memo" value={f.memo} onChange={e => setF({ ...f, memo: e.target.value })} /></div>
+        </div>
+        <div className="act-buttons"><button type="button" onClick={() => setEdit(null)}>목록</button><button className="primary">저장</button></div>
+      </form>}
     </Modal>
   )
 }

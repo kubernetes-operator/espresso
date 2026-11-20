@@ -4,7 +4,7 @@ import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast, Empty } from '../components/ui'
 import { ApprovalPanel, Timeline } from '../components/DocPanels'
 import { useSession } from '../session'
-import { won, dt } from '../format'
+import { won, dt, num } from '../format'
 import { EMP_TYPE } from './Hr'
 
 export const PR_ST: Record<string, string> = { DRAFT: '작성', CALCULATED: '계산됨', REQUESTED: '결재 중', CONFIRMED: '확정', PAID: '지급 완료', REJECTED: '반려' }
@@ -188,8 +188,8 @@ function ExtrasModal({ run, onClose, onDone }: any) {
           <tr key={e.employee_id}>
             <td><code>{e.emp_no}</code></td><td>{e.name}</td>
             <td><small>{e.hire_date}{e.resign_date && <> / <b>{e.resign_date} 퇴사</b></>}</small></td>
-            <td className="num"><input aria-label={`${e.name} 상여금`} className="mini" style={{ width: 120 }} inputMode="numeric" value={v(e).bonus} onChange={x => set(e, 'bonus', x.target.value)} /></td>
-            <td className="num"><input aria-label={`${e.name} 퇴직금`} className="mini" style={{ width: 120 }} inputMode="numeric" value={v(e).severance} onChange={x => set(e, 'severance', x.target.value)} />
+            <td className="num"><input aria-label={`${e.name} 상여금`} className="mini" style={{ width: 120 }} inputMode="numeric" value={num(v(e).bonus)} onChange={x => set(e, 'bonus', x.target.value)} /></td>
+            <td className="num"><input aria-label={`${e.name} 퇴직금`} className="mini" style={{ width: 120 }} inputMode="numeric" value={num(v(e).severance)} onChange={x => set(e, 'severance', x.target.value)} />
               {e.suggested_severance != null && !v(e).severance && <div><button className="ghost small" onClick={() => set(e, 'severance', String(e.suggested_severance))}>추정 {won(e.suggested_severance)} 넣기</button></div>}</td>
           </tr>))}</tbody>
       </table></div>

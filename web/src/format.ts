@@ -34,3 +34,10 @@ export const DIVISIONS: Record<string, string> = { BEVERAGE: '음료', DESSERT: 
 /** 사이트 구분: 본사 / 매장 / 베이커리 */
 export const SITE_TYPES: Record<string, string> = { HQ: '본사', STORE: '매장', BAKERY: '베이커리' }
 export const HQ_SITE = '00000000-0000-0000-0000-0000000000a0'
+
+/** 금액 입력칸 표시: 숫자만 남겨 세 자리마다 쉼표 (상태값은 쉼표 없는 숫자 문자열 그대로) */
+export function num(v: string | number | null | undefined) {
+  if (v === null || v === undefined || v === '') return ''
+  const d = String(v).replace(/[^\d]/g, '')
+  return d === '' ? '' : Number(d).toLocaleString('ko-KR')
+}
