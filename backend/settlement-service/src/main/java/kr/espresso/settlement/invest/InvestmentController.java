@@ -18,10 +18,14 @@ import java.util.*;
 @RestController
 public class InvestmentController {
     static final Map<String, String> CAT = Map.of("INTERIOR", "인테리어", "EQUIPMENT", "설비", "DEPOSIT", "임차보증금", "PREMIUM", "권리금", "INITIAL_STOCK", "초도 물품", "OTHER", "기타");
+    static final Map<String, String> SOURCE = Map.of("INVESTOR", "투자자 출자", "HQ", "본사 지원");
     private final JdbcClient db;
     private final CoreClient core;
+    private final kr.espresso.settlement.close.SettlementService stl;
 
-    public InvestmentController(JdbcClient db, CoreClient core) { this.db = db; this.core = core; }
+    public InvestmentController(JdbcClient db, CoreClient core, kr.espresso.settlement.close.SettlementService stl) { this.db = db; this.core = core; this.stl = stl; }
+
+    static boolean isStore(Map<String, Object> st) { return st.get("site_type") == null || "STORE".equals(st.get("site_type")); }
 
     void audit(UUID actor, String action, UUID target, String data) {
         db.sql("insert into stl.audit_log(actor_id, action, target_type, target_id, after_data) values (?,?, 'INVESTMENT', ?, cast(? as jsonb))").params(actor, action, target, data).update();
@@ -42,15 +46,18 @@ public class InvestmentController {
         audit(u.id(), "INVESTMENT_VIEW", null, "{}");
         List<Map<String, Object>> stores = new ArrayList<>();
         for (var st : core.allStores()) {
+            if (!isStore(st)) continue;   // 본사·베이커리는 투자 대상 매장이 아님
             UUID id = UUID.fromString(st.get("id").toString());
             var items = db.sql("select * from stl.investment_item where store_id = ? order by invested_on, category").param(id).query().listOfRows();
             long total = items.stream().mapToLong(i -> ((Number) i.get("amount")).longValue()).sum();
+            long investorTotal = items.stream().filter(i -> "INVESTOR".equals(i.get("funding_source"))).mapToLong(i -> ((Number) i.get("amount")).longValue()).sum();
             Map<String, Long> byCat = new LinkedHashMap<>();
             items.forEach(i -> byCat.merge(CAT.get((String) i.get("category")), ((Number) i.get("amount")).longValue(), Long::sum));
             long cum = cumulativeSettlement(id);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("store_id", id); m.put("store_name", st.get("name")); m.put("region_name", st.get("region_name")); m.put("open_date", st.get("open_date"));
-            m.put("total", total); m.put("by_category", byCat); m.put("items", items);
+            m.put("total", total); m.put("investor_total", investorTotal); m.put("hq_total", total - investorTotal);   // 매장 구성 총액 = 투자자 출자 + 본사 지원
+            m.put("by_category", byCat); m.put("items", items);
             m.put("cumulative_settlement", cum); m.put("recovery_rate", total == 0 ? null : Math.round(cum * 1000.0 / total) / 10.0);
             m.put("disclosures", db.sql("select d.*, i.display_name, i.user_id from stl.investor_disclosure d join stl.investor i on i.id = d.investor_id where d.store_id = ? order by i.display_name").param(id).query().listOfRows());
             stores.add(m);
@@ -58,23 +65,40 @@ public class InvestmentController {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("stores", stores);
         out.put("grand_total", stores.stream().mapToLong(s -> (Long) s.get("total")).sum());
+        out.put("grand_investor", stores.stream().mapToLong(s -> (Long) s.get("investor_total")).sum());
+        out.put("grand_hq", stores.stream().mapToLong(s -> (Long) s.get("hq_total")).sum());
         out.put("investors", db.sql("select * from stl.investor order by display_name").query().listOfRows());
         return out;
     }
 
-    public record ItemReq(UUID storeId, String category, String description, Long amount, String investedOn) {}
+    public record ItemReq(UUID storeId, String category, String description, Long amount, String investedOn, String fundingSource) {}
 
     @PostMapping("/api/stl/investments")
     public Map<String, Object> add(@RequestBody ItemReq r) {
         CurrentUser u = CurrentUser.get();
         u.require(Roles.HQ_ADMIN);
         if (!CAT.containsKey(r.category()) || r.amount() == null || r.amount() <= 0) throw ApiException.bad("구분과 금액을 확인하세요.");
+        String src = Objects.requireNonNullElse(r.fundingSource(), "HQ");
+        if (!SOURCE.containsKey(src)) throw ApiException.bad("자금 출처는 투자자 출자(INVESTOR) / 본사 지원(HQ) 입니다.");
         UUID id = UUID.randomUUID();
-        db.sql("insert into stl.investment_item(id, store_id, category, description, amount, invested_on, created_by) values (?,?,?,?,?, cast(? as date), ?)")
+        db.sql("insert into stl.investment_item(id, store_id, category, description, amount, invested_on, funding_source, created_by) values (?,?,?,?,?, cast(? as date), ?, ?)")
                 .params(id, r.storeId(), r.category(), Objects.requireNonNullElse(r.description(), CAT.get(r.category())), r.amount(),
-                        Objects.requireNonNullElse(r.investedOn(), LocalDate.now().toString()), u.id()).update();
+                        Objects.requireNonNullElse(r.investedOn(), LocalDate.now().toString()), src, u.id()).update();
         audit(u.id(), "INVESTMENT_ADD", id, "{\"amount\":" + r.amount() + "}");
         return Map.of("id", id);
+    }
+
+    public record SourceReq(String fundingSource) {}
+
+    /** 자금 출처 변경 (투자자 출자 ↔ 본사 지원) */
+    @PutMapping("/api/stl/investments/{id}")
+    public Map<String, Object> setSource(@PathVariable UUID id, @RequestBody SourceReq r) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        if (!SOURCE.containsKey(r.fundingSource())) throw ApiException.bad("자금 출처는 INVESTOR / HQ 입니다.");
+        db.sql("update stl.investment_item set funding_source = ? where id = ?").params(r.fundingSource(), id).update();
+        audit(u.id(), "INVESTMENT_SOURCE", id, "{\"source\":\"" + r.fundingSource() + "\"}");
+        return Map.of("ok", true);
     }
 
     @DeleteMapping("/api/stl/investments/{id}")
@@ -172,7 +196,12 @@ public class InvestmentController {
                 default -> total;
             };
             Map<String, Object> m = new LinkedHashMap<>();
+            m.put("store_id", store);
             m.put("store_name", names.get(store.toString())); m.put("mode", mode); m.put("amount", shown);
+            if ("TOTAL".equals(mode)) {   // 총액 공개: 투자자 출자 / 본사 지원 구분
+                long invAmt = db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ? and funding_source = 'INVESTOR'").param(store).query(Long.class).single();
+                m.put("investor_total", invAmt); m.put("hq_total", total - invAmt);
+            }
             if ("RATIO".equals(mode)) m.put("ratio", d.get("ratio"));
             if (Boolean.TRUE.equals(d.get("show_settlement"))) {
                 long cum = cumulativeSettlement(store);
@@ -190,6 +219,45 @@ public class InvestmentController {
                         }).toList());
             }
             out.add(m);
+        }
+        return out;
+    }
+
+    /**
+     * 투자자 분석: 투자 매장의 최근 12개월 월별 매출액·영업이익·결산액 (마감 전 달은 실시간 계산)
+     * 결산액(내 몫)은 공개 설정에서 결산 공개를 켠 경우에만
+     */
+    @GetMapping("/api/stl/investor/me/trend")
+    public List<Map<String, Object>> trend() {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.INVESTOR);
+        var inv = db.sql("select id from stl.investor where user_id = ?").param(u.id()).query(UUID.class).optional();
+        if (inv.isEmpty()) return List.of();
+        Map<String, String> names = new HashMap<>();
+        core.allStores().forEach(s -> names.put(s.get("id").toString(), (String) s.get("name")));
+        java.time.YearMonth now = java.time.YearMonth.now(java.time.ZoneId.of("Asia/Seoul"));
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (var d : db.sql("select * from stl.investor_disclosure where investor_id = ? and visible_from <= current_date and (visible_to is null or visible_to >= current_date)")
+                .param(inv.get()).query().listOfRows()) {
+            UUID store = (UUID) d.get("store_id");
+            boolean showStl = Boolean.TRUE.equals(d.get("show_settlement"));
+            BigDecimal ratio = "RATIO".equals(d.get("mode")) ? (BigDecimal) d.get("ratio") : BigDecimal.ONE;
+            List<Map<String, Object>> months = new ArrayList<>();
+            var fmt = java.time.format.DateTimeFormatter.ofPattern("yyyyMM");
+            // 매출액: 일 매출(과거 실적 포함). 이익: 결산 분개가 있는 달만 (없으면 null → 선 끊김)
+            Map<String, Long> sales = new HashMap<>();
+            core.monthlySales(store, now.minusMonths(11).format(fmt), now.format(fmt)).forEach(x -> sales.put((String) x.get("period"), ((Number) x.get("net_sales")).longValue()));
+            for (int i = 11; i >= 0; i--) {
+                String p = now.minusMonths(i).format(fmt);
+                Map<String, Object> s = stl.summary(store, p);
+                boolean booked = ((Number) s.getOrDefault("net_sales", 0)).longValue() != 0;
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("period", p); m.put("net_sales", sales.get(p)); m.put("operating_profit", booked ? s.get("operating_profit") : null);
+                m.put("closed", s.get("closed"));
+                if (showStl) m.put("settlement_share", booked ? ratio.multiply(BigDecimal.valueOf(((Number) s.get("settlement_amount")).longValue())).setScale(0, RoundingMode.FLOOR).longValue() : null);
+                months.add(m);
+            }
+            out.add(Map.of("store_id", store, "store_name", names.getOrDefault(store.toString(), ""), "show_settlement", showStl, "months", months));
         }
         return out;
     }

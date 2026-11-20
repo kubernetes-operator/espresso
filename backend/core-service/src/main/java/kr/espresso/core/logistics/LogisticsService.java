@@ -33,11 +33,12 @@ public class LogisticsService implements ApprovalHandler {
     private final StockService stock;
     private final Outbox outbox;
     private final Notifier notifier;
+    private final AuthClient auth;
 
     public LogisticsService(JdbcClient db, PriceService prices, StoreScope scope, DocNo docNo, DocTrail trail,
-                            ApprovalService approvals, StockService stock, Outbox outbox, Notifier notifier) {
+                            ApprovalService approvals, StockService stock, Outbox outbox, Notifier notifier, AuthClient auth) {
         this.db = db; this.prices = prices; this.scope = scope; this.docNo = docNo; this.trail = trail;
-        this.approvals = approvals; this.stock = stock; this.outbox = outbox; this.notifier = notifier;
+        this.approvals = approvals; this.stock = stock; this.outbox = outbox; this.notifier = notifier; this.auth = auth;
     }
 
     public record LineReq(String sourceType, UUID itemId, BigDecimal qty, String memo,
@@ -221,6 +222,9 @@ public class LogisticsService implements ApprovalHandler {
                 .params(sid, id, req.carrier(), req.trackingNo(), u.id(), req.memo()).update();
         db.sql("insert into logistics.shipment_line(shipment_id, request_line_id, shipped_qty) select ?, id, qty from logistics.request_line where request_id = ? and line_status <> 'CANCELLED'")
                 .params(sid, id).update();
+        // 본사 물류 품목은 본사 창고 재고에서 차감 (부족해도 발송은 막지 않고 음수로 표시 → 본사 입고로 맞춤)
+        for (var l : db.sql("select item_id, qty from logistics.request_line where request_id = ? and source_type = 'HQ' and line_status <> 'CANCELLED'").param(id).query().listOfRows())
+            stock.issue(kr.espresso.common.Sites.HQ, (UUID) l.get("item_id"), (BigDecimal) l.get("qty"), "TRANSFER_OUT", DOC, id, u.id());
         db.sql("update logistics.request_line set line_status = 'SHIPPED' where request_id = ? and line_status in ('OPEN','PURCHASED')").param(id).update();
         db.sql("update logistics.request set status = 'SHIPPED', shipped_at = now() where id = ?").param(id).update();
         trail.log(DOC, id, (String) r.get("status"), "SHIPPED", u.id(),
@@ -238,18 +242,24 @@ public class LogisticsService implements ApprovalHandler {
         trail.log(DOC, id, "SHIPPED", "DELIVERED", u.id(), "도착");
     }
 
-    public record ReceiveLine(UUID lineId, BigDecimal receivedQty) {}
+    /**
+     * 수령 검수 라인: receivedQty = 정상 수령 수량. 요청 수량과의 차이는 문제 수량
+     *  problemType: SHORT(미도착·부족) / DAMAGED(파손) / DEFECT(불량)
+     *  resolution : RESEND(본사 재발송, 무상) / WRITE_OFF(손실·결손 처리 → 결재 초안)
+     */
+    public record ReceiveLine(UUID lineId, BigDecimal receivedQty, String problemType, String resolution, String memo) {}
     public record ReceiveReq(List<ReceiveLine> lines, String memo) {}
 
-    /** 매장 검수: 재고 입고(이동평균) + 부족분 '배송 부족' 결손 초안 + 결산 이벤트 */
+    /** 매장 검수: 재고 입고(이동평균) + 문제 수량 처리(재발송 요청 / 손실·결손 초안) + 결산 이벤트 */
     @Transactional
     public Map<String, Object> receive(UUID id, ReceiveReq req, CurrentUser u) {
         var r = load(id);
         UUID store = (UUID) r.get("store_id");
         scope.requireRoleOn(u, store, Roles.OWNER, Roles.STORE_MGR, Roles.STAFF, Roles.HQ_ADMIN);
         expect(r, "SHIPPED", "DELIVERED");
-        Map<UUID, BigDecimal> got = new HashMap<>();
-        if (req.lines() != null) req.lines().forEach(l -> got.put(l.lineId(), l.receivedQty()));
+        boolean resendDoc = "RESEND".equals(r.get("kind"));
+        Map<UUID, ReceiveLine> got = new HashMap<>();
+        if (req.lines() != null) req.lines().forEach(l -> got.put(l.lineId(), l));
         var lines = db.sql("""
                 select l.*, c.division_code, c.code as category_code,
                   (c.is_asset or coalesce(i.is_asset, false)
@@ -257,59 +267,125 @@ public class LogisticsService implements ApprovalHandler {
                 from logistics.request_line l join catalog.category c on c.id = l.category_id
                 left join catalog.item i on i.id = l.item_id
                 where l.request_id = ? and l.line_status <> 'CANCELLED' order by l.line_no""").param(id).query().listOfRows();
-        List<Map<String, Object>> shortages = new ArrayList<>();
+        // adj_type -> 라인들
+        Map<String, List<Map<String, Object>>> writeOffs = new LinkedHashMap<>();
+        List<Map<String, Object>> resends = new ArrayList<>();
         List<Map<String, Object>> evLines = new ArrayList<>();
         for (var l : lines) {
             BigDecimal qty = (BigDecimal) l.get("qty");
-            BigDecimal rec = got.getOrDefault((UUID) l.get("id"), qty);
+            ReceiveLine in = got.get((UUID) l.get("id"));
+            BigDecimal rec = in == null || in.receivedQty() == null ? qty : in.receivedQty();
             if (rec.signum() < 0 || rec.compareTo(qty) > 0) throw ApiException.bad("수령 수량은 0 ~ 요청 수량 사이여야 합니다: " + l.get("item_name"));
-            boolean short_ = rec.compareTo(qty) < 0;
-            db.sql("update logistics.request_line set received_qty = ?, line_status = ? where id = ?")
-                    .params(rec, short_ ? "SHORT" : "RECEIVED", l.get("id")).update();
+            BigDecimal problem = qty.subtract(rec);
+            boolean hq = "HQ".equals(l.get("source_type"));
+            String ptype = problem.signum() == 0 ? null : in == null || in.problemType() == null ? "SHORT" : in.problemType();
+            if (ptype != null && !Set.of("SHORT", "DAMAGED", "DEFECT").contains(ptype)) throw ApiException.bad("문제 유형은 부족/파손/불량 중 하나입니다.");
+            String resolution = ptype == null ? null : in == null || in.resolution() == null ? "WRITE_OFF" : in.resolution();
+            if (resolution != null && !Set.of("RESEND", "WRITE_OFF").contains(resolution)) throw ApiException.bad("처리 방법은 재발송 / 손실·결손 처리입니다.");
+            if ("RESEND".equals(resolution) && !hq) throw ApiException.bad("재발송은 본사 물류 품목만 가능합니다: " + l.get("item_name"));
+            db.sql("update logistics.request_line set received_qty = ?, line_status = ?, problem_type = ?, problem_qty = ?, resolution = ?, memo = coalesce(cast(? as text), memo) where id = ?")
+                    .params(rec, ptype == null ? "RECEIVED" : "SHORT", ptype, ptype == null ? null : problem, resolution,
+                            in == null ? null : in.memo(), l.get("id")).update();
             long supply = ((Number) l.get("supply_amount")).longValue();
             boolean asset = Boolean.TRUE.equals(l.get("category_asset"));
-            BigDecimal unitCost = BigDecimal.valueOf(supply).divide(qty, 2, RoundingMode.HALF_UP);
-            if ("HQ".equals(l.get("source_type")) && !asset) {
-                stock.receive(store, (UUID) l.get("item_id"), qty, unitCost, DOC, id, u.id());
-                if (short_) shortages.add(Map.of("itemId", l.get("item_id"), "qty", qty.subtract(rec), "unitCost", unitCost, "name", l.get("item_name")));
+            BigDecimal unitCost = l.get("stock_unit_cost") != null ? (BigDecimal) l.get("stock_unit_cost")
+                    : BigDecimal.valueOf(supply).divide(qty, 2, RoundingMode.HALF_UP);
+            if (hq && !asset) {
+                // 재발송: 정상분만 입고 (나머지는 재발송분이 도착할 때 같은 단가로 입고)
+                // 손실·결손 처리: 요청 수량 전체 입고 후 문제 수량을 결재 초안으로 차감
+                BigDecimal inQty = "RESEND".equals(resolution) ? rec : qty;
+                if (inQty.signum() > 0) stock.receive(store, (UUID) l.get("item_id"), inQty, unitCost, DOC, id, u.id());
+                if ("WRITE_OFF".equals(resolution)) {
+                    String adjType = "SHORT".equals(ptype) ? "SHORTAGE" : "LOSS";
+                    String reason = switch (ptype) { case "DAMAGED" -> "RECEIPT_DAMAGED"; case "DEFECT" -> "RECEIPT_DEFECT"; default -> "DELIVERY_SHORT"; };
+                    writeOffs.computeIfAbsent(adjType, k -> new ArrayList<>()).add(Map.of("itemId", l.get("item_id"), "qty", problem, "unitCost", unitCost, "reason", reason));
+                }
+                if ("RESEND".equals(resolution)) resends.add(Map.of("line", l, "qty", problem, "unitCost", unitCost));
             }
             Map<String, Object> ev = new LinkedHashMap<>();
             ev.put("lineId", l.get("id")); ev.put("itemName", l.get("item_name")); ev.put("sourceType", l.get("source_type"));
             ev.put("division", l.get("division_code")); ev.put("categoryCode", l.get("category_code")); ev.put("isAsset", asset);
-            ev.put("stocked", "HQ".equals(l.get("source_type")) && !asset);
+            ev.put("stocked", hq && !asset);
             ev.put("payer", l.get("payer")); ev.put("taxType", l.get("tax_type"));
             ev.put("supply", supply); ev.put("vat", l.get("vat_amount")); ev.put("total", l.get("total_amount"));
             ev.put("shippingFee", l.get("shipping_fee")); ev.put("qty", qty); ev.put("receivedQty", rec);
             evLines.add(ev);
         }
-        UUID adjId = null;
-        if (!shortages.isEmpty()) {
-            adjId = UUID.randomUUID();
+        List<UUID> adjIds = new ArrayList<>();
+        for (var e : writeOffs.entrySet()) {
+            UUID adjId = UUID.randomUUID();
             String no = docNo.next("SA");
             long total = 0;
-            db.sql("insert into inventory.stock_adjustment(id, adj_no, store_id, adj_type, status, source_type, source_id, memo, created_by) values (?,?,?, 'SHORTAGE', 'DRAFT', 'LOGISTICS_RECEIPT', ?, ?, ?)")
-                    .params(adjId, no, store, id, r.get("request_no") + " 배송 부족분 (자동 생성)", u.id()).update();
-            for (var s : shortages) {
-                BigDecimal q = (BigDecimal) s.get("qty");
-                BigDecimal uc = (BigDecimal) s.get("unitCost");
+            String label = "SHORTAGE".equals(e.getKey()) ? "배송 부족분" : "수령 시 파손·불량분";
+            db.sql("insert into inventory.stock_adjustment(id, adj_no, store_id, adj_type, status, source_type, source_id, memo, created_by) values (?,?,?,?, 'DRAFT', 'LOGISTICS_RECEIPT', ?, ?, ?)")
+                    .params(adjId, no, store, e.getKey(), id, r.get("request_no") + " " + label + " (자동 생성)", u.id()).update();
+            for (var x : e.getValue()) {
+                BigDecimal q = (BigDecimal) x.get("qty");
+                BigDecimal uc = (BigDecimal) x.get("unitCost");
                 long amt = q.multiply(uc).setScale(0, RoundingMode.HALF_UP).longValue();
                 total += amt;
-                db.sql("insert into inventory.stock_adjustment_line(adjustment_id, item_id, qty, reason_code, unit_cost, amount) values (?,?,?, 'DELIVERY_SHORT', ?, ?)")
-                        .params(adjId, s.get("itemId"), q, uc, amt).update();
+                db.sql("insert into inventory.stock_adjustment_line(adjustment_id, item_id, qty, reason_code, unit_cost, amount) values (?,?,?,?,?,?)")
+                        .params(adjId, x.get("itemId"), q, x.get("reason"), uc, amt).update();
             }
             db.sql("update inventory.stock_adjustment set total_amount = ? where id = ?").params(total, adjId).update();
-            trail.log("STOCK_ADJUSTMENT", adjId, null, "DRAFT", u.id(), "배송 부족 자동 생성: " + r.get("request_no"));
-            trail.log(DOC, id, (String) r.get("status"), "PARTIALLY_RECEIVED", u.id(), "부족 " + shortages.size() + "건 → 결손 초안 " + no);
+            trail.log("STOCK_ADJUSTMENT", adjId, null, "DRAFT", u.id(), label + " 자동 생성: " + r.get("request_no"));
+            adjIds.add(adjId);
         }
+        UUID resendId = resends.isEmpty() ? null : createResend(r, resends, u);
+        if (!writeOffs.isEmpty() || resendId != null)
+            trail.log(DOC, id, (String) r.get("status"), "PARTIALLY_RECEIVED", u.id(),
+                    "문제 " + (writeOffs.values().stream().mapToInt(List::size).sum() + resends.size()) + "건"
+                            + (adjIds.isEmpty() ? "" : " · 손실·결손 초안 " + adjIds.size() + "건") + (resendId == null ? "" : " · 재발송 요청"));
         db.sql("update logistics.request set status = 'COMPLETED', received_at = now(), completed_at = now() where id = ?").param(id).update();
-        trail.log(DOC, id, shortages.isEmpty() ? (String) r.get("status") : "PARTIALLY_RECEIVED", "COMPLETED", u.id(),
+        trail.log(DOC, id, writeOffs.isEmpty() && resendId == null ? (String) r.get("status") : "PARTIALLY_RECEIVED", "COMPLETED", u.id(),
                 Objects.requireNonNullElse(req.memo(), "검수 완료"));
-        outbox.publish("logistics", DOC, id, "LogisticsReceived", Map.of(
-                "requestId", id, "requestNo", r.get("request_no"), "storeId", store, "receivedAt", java.time.OffsetDateTime.now().toString(),
-                "lines", evLines));
+        // 재발송 문서는 무상 → 결산 반영 없음 (원 요청 수령 때 이미 금액 반영)
+        if (!resendDoc)
+            outbox.publish("logistics", DOC, id, "LogisticsReceived", Map.of(
+                    "requestId", id, "requestNo", r.get("request_no"), "storeId", store, "receivedAt", java.time.OffsetDateTime.now().toString(),
+                    "lines", evLines));
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("shortageAdjustmentId", adjId);
+        out.put("shortageAdjustmentId", adjIds.isEmpty() ? null : adjIds.get(0));
+        out.put("adjustmentIds", adjIds);
+        out.put("resendRequestId", resendId);
         return out;
+    }
+
+    /** 재발송 요청: 물류 승인 상태로 바로 생성 (무상, 재고 단가는 원 요청 단가) → 물류 처리 보드에서 발송 */
+    @SuppressWarnings("unchecked")
+    UUID createResend(Map<String, Object> orig, List<Map<String, Object>> resends, CurrentUser u) {
+        UUID nid = UUID.randomUUID();
+        UUID store = (UUID) orig.get("store_id");
+        db.sql("""
+                insert into logistics.request(id, request_no, store_id, title, status, kind, parent_request_id, due_date, memo, requested_by, requested_at, approved_at, created_by)
+                values (?,?,?,?, 'LOGISTICS_APPROVED', 'RESEND', ?, current_date + 2, ?, ?, now(), now(), ?)""")
+                .params(nid, docNo.next("LR"), store, "재발송 · " + orig.get("request_no"), orig.get("id"),
+                        "수령 검수에서 부족·파손·불량으로 재발송 요청 (무상)", u.id(), u.id()).update();
+        int no = 1;
+        for (var x : resends) {
+            Map<String, Object> l = (Map<String, Object>) x.get("line");
+            db.sql("""
+                    insert into logistics.request_line(request_id, line_no, source_type, item_id, category_id, item_name, unit, tax_type, qty,
+                      list_unit_price, discount_amount, supply_amount, vat_amount, total_amount, resend_of_line_id, stock_unit_cost, memo)
+                    values (?,?, 'HQ', ?,?,?,?,?,?, 0, 0, 0, 0, 0, ?, ?, '재발송(무상)')""")
+                    .params(nid, no++, l.get("item_id"), l.get("category_id"), l.get("item_name"), l.get("unit"), l.get("tax_type"),
+                            x.get("qty"), l.get("id"), x.get("unitCost")).update();
+        }
+        trail.log(DOC, nid, null, "LOGISTICS_APPROVED", u.id(), "재발송 요청 생성 (원 요청 " + orig.get("request_no") + ")");
+        List<UUID> logi = auth.approvers(Roles.LOGISTICS_MGR, store, scope.regionOf(store));
+        notifier.send(logi, "RESEND", "재발송 요청", orig.get("request_no") + " 수령 문제로 재발송이 필요합니다", "/logistics/" + nid, store);
+        return nid;
+    }
+
+    public record DueReq(String dueDate) {}
+
+    /** 처리 기한 지정 (물류 관리자·총괄) */
+    @Transactional
+    public void setDue(UUID id, DueReq req, CurrentUser u) {
+        var r = load(id);
+        scope.requireRoleOn(u, (UUID) r.get("store_id"), HQ_LOGI);
+        db.sql("update logistics.request set due_date = cast(? as date), updated_at = now() where id = ?").params(blank(req.dueDate()), id).update();
+        trail.log(DOC, id, (String) r.get("status"), (String) r.get("status"), u.id(), "처리 기한 " + Objects.requireNonNullElse(blank(req.dueDate()), "해제"));
     }
 
     @Transactional

@@ -141,6 +141,9 @@ public class EventController {
         lines.add(Line.dr("801", p.path("regularPay").asLong(), null, "급여"));
         lines.add(Line.dr("804", p.path("partTimePay").asLong(), null, "잡급"));
         lines.add(Line.dr("803", p.path("allowances").asLong(), null, "제수당"));
+        lines.add(Line.dr("802", p.path("bonus").asLong(), null, "상여금"));
+        // 퇴직금 지급: 퇴직급여충당부채 감소 (충당금 부족분은 결산 조정)
+        lines.add(Line.dr("295", p.path("severancePaid").asLong(), null, "퇴직금 지급"));
         lines.add(Line.dr("811", p.path("employerContrib").asLong(), null, "4대보험 사업자분"));
         lines.add(Line.dr("806", p.path("severanceAccrual").asLong(), null, "퇴직급여 충당"));
         lines.add(Line.cr("254", p.path("deductions").asLong() + p.path("employerContrib").asLong(), null, "예수금(공제+사업자분)"));

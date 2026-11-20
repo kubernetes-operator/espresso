@@ -32,7 +32,10 @@ function calc(l: Line) {
 export function LogisticsNew() {
   const s = useSession()
   const nav = useNavigate()
-  const [storeId, setStoreId] = useState(s.storeId !== 'ALL' ? s.storeId : s.stores[0]?.id ?? '')
+  // 상단에서 매장을 골랐으면 그 매장으로 고정, 전체(또는 본사)면 요청할 매장을 고름
+  const reqSites = s.stores.filter(x => (x.site_type ?? 'STORE') !== 'HQ')
+  const locked = s.storeId !== 'ALL' && reqSites.some(x => x.id === s.storeId)
+  const [storeId, setStoreId] = useState(locked ? s.storeId : reqSites[0]?.id ?? '')
   const [tab, setTab] = useState<'HQ' | 'EXTERNAL'>('HQ')
   const [division, setDivision] = useState('')
   const [q, setQ] = useState('')
@@ -92,11 +95,12 @@ export function LogisticsNew() {
     <Page title="물류 요청 작성" sub={<>매장별 단가·할인이 자동 적용됩니다 · <Badge tone={inc ? 'accent' : 'neutral'}>VAT {inc ? '포함' : '별도'} 표시</Badge></>}>
       <div className="card form-inline">
         <div><label htmlFor="ln-store">매장</label>
+          {locked ? <b id="ln-store">{store?.name}</b> :
           <select id="ln-store" value={storeId} onChange={e => { setStoreId(e.target.value); setLines([]) }}>
-            {s.stores.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select></div>
+            {reqSites.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>}</div>
         <div className="grow"><label htmlFor="ln-title">제목</label><input id="ln-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 11월 3주 원두·컵" /></div>
-        <div><label htmlFor="ln-date">희망일</label><input id="ln-date" type="date" value={desired} onChange={e => setDesired(e.target.value)} /></div>
+        <div><label htmlFor="ln-date">요청 기한</label><input id="ln-date" type="date" value={desired} min={new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)} onChange={e => setDesired(e.target.value)} /></div>
       </div>
       <div className="split">
         <section className="card">
@@ -144,19 +148,22 @@ export function LogisticsNew() {
               <label htmlFor="ex-cat">카테고리</label>
               <select id="ex-cat" value={ext.categoryId} onChange={e => setExt({ ...ext, categoryId: e.target.value })}>
                 <option value="">선택</option>
-                {(cats.data ?? []).map(c => <option key={c.id} value={c.id}>{c.division_name} · {c.name}</option>)}
+                {[...new Set((cats.data ?? []).map(c => c.division_name))].map(d => <optgroup key={d} label={d}>
+                  {(cats.data ?? []).filter(c => c.division_name === d).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
               </select>
-              <div className="row">
+              <div className="row two">
                 <div><label htmlFor="ex-price">단가 (원)</label><input id="ex-price" inputMode="numeric" value={ext.unitPrice} onChange={e => setExt({ ...ext, unitPrice: e.target.value.replace(/\D/g, '') })} /></div>
                 <div><label htmlFor="ex-mode">단가 기준</label>
                   <select id="ex-mode" value={ext.priceInputMode} onChange={e => setExt({ ...ext, priceInputMode: e.target.value })}>
                     <option value="INCLUSIVE">VAT 포함 금액</option><option value="EXCLUSIVE">VAT 별도 금액</option></select></div>
+              </div>
+              <div className="row two">
                 <div><label htmlFor="ex-tax">과세</label>
                   <select id="ex-tax" value={ext.taxType} onChange={e => setExt({ ...ext, taxType: e.target.value })}>
                     <option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
-              </div>
-              <div className="row">
                 <div><label htmlFor="ex-qty">수량</label><input id="ex-qty" inputMode="decimal" value={ext.qty} onChange={e => setExt({ ...ext, qty: e.target.value })} /></div>
+              </div>
+              <div className="row two">
                 <div><label htmlFor="ex-ship">배송비 (원)</label><input id="ex-ship" inputMode="numeric" value={ext.shippingFee} onChange={e => setExt({ ...ext, shippingFee: e.target.value.replace(/\D/g, '') })} /></div>
                 <div><label htmlFor="ex-payer">결제 주체</label>
                   <select id="ex-payer" value={ext.payer} onChange={e => setExt({ ...ext, payer: e.target.value })}>

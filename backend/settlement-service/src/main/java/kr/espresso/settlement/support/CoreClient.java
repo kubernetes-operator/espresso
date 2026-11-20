@@ -58,6 +58,11 @@ public class CoreClient {
         return r == null ? List.of() : r;
     }
 
+    public List<Map<String, Object>> monthlySales(UUID store, String from, String to) {
+        List<Map<String, Object>> r = http.get().uri("/internal/sales/monthly?storeId={s}&from={f}&to={t}", store, from, to).retrieve().body(new ParameterizedTypeReference<>() {});
+        return r == null ? List.of() : r;
+    }
+
     public List<Map<String, Object>> leases(UUID store) {
         List<Map<String, Object>> r = http.get().uri("/internal/stores/{id}/leases", store).retrieve().body(new ParameterizedTypeReference<>() {});
         return r == null ? List.of() : r;

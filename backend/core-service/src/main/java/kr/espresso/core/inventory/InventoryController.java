@@ -71,6 +71,29 @@ public class InventoryController {
         return Map.of("ok", true);
     }
 
+    public record HqReceiptLine(UUID itemId, BigDecimal qty, BigDecimal unitCost) {}
+    public record HqReceiptReq(List<HqReceiptLine> lines, String memo) {}
+
+    /** 본사 창고 입고 (공급처 매입): 본사 재고 증가 · 이동평균. 매장 발송 시 본사 재고에서 차감된다 */
+    @PostMapping("/hq-receipts")
+    @Transactional
+    public Map<String, Object> hqReceipt(@RequestBody HqReceiptReq r) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR);
+        if (r.lines() == null || r.lines().isEmpty()) throw ApiException.bad("입고할 품목을 넣으세요.");
+        UUID ref = UUID.randomUUID();
+        int n = 0;
+        for (HqReceiptLine l : r.lines()) {
+            if (l.itemId() == null || l.qty() == null || l.qty().signum() <= 0) throw ApiException.bad("품목과 수량을 확인하세요.");
+            BigDecimal cost = l.unitCost();
+            if (cost == null) cost = db.sql("select coalesce(hq_cost, base_price) from catalog.item where id = ?").param(l.itemId()).query(BigDecimal.class).single();
+            stock.receive(kr.espresso.common.Sites.HQ, l.itemId(), l.qty(), cost, "HQ_RECEIPT", ref, u.id());
+            n++;
+        }
+        trail.log("HQ_RECEIPT", ref, null, "DONE", u.id(), Objects.requireNonNullElse(r.memo(), "본사 입고 " + n + "건"));
+        return Map.of("id", ref, "lines", n);
+    }
+
     @GetMapping("/reasons")
     public List<Map<String, Object>> reasons() {
         CurrentUser.get();

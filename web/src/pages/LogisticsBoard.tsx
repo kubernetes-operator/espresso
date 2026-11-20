@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { useApi, Page, Badge, ErrorBox } from '../components/ui'
 import { useSession } from '../session'
 import { won, dt } from '../format'
-import { LR_STATUS, LR_TONE } from './logisticsShared'
+import { LR_STATUS, LR_TONE, overdue, dueText } from './logisticsShared'
 
 const COLS: { title: string; statuses: string[]; hint: string }[] = [
   { title: '결재 진행', statuses: ['REQUESTED', 'STORE_APPROVED'], hint: '단가 조정 가능' },
@@ -14,19 +14,22 @@ const COLS: { title: string; statuses: string[]; hint: string }[] = [
 export function LogisticsBoard() {
   const s = useSession()
   const nav = useNavigate()
-  const list = useApi<any[]>(`/api/core/logistics${s.storeId !== 'ALL' && s.stores.length <= 1 ? `?storeId=${s.storeId}` : ''}`, [s.storeId])
+  const one = s.storeId !== 'ALL' && (s.currentStore?.site_type ?? 'STORE') !== 'HQ'
+  const list = useApi<any[]>(`/api/core/logistics${one ? `?storeId=${s.storeId}` : ''}`, [s.storeId])
+  const sortDue = (a: any, b: any) => String(a.due_date ?? a.desired_date ?? '9999').localeCompare(String(b.due_date ?? b.desired_date ?? '9999'))
   return (
-    <Page title="물류 처리" sub="담당 매장 전체 · 카드를 눌러 처리">
+    <Page title="물류 처리" sub={`${one ? s.currentStore?.name : '담당 매장 전체'} · 기한이 가까운 순 · 카드를 눌러 처리`}>
       <ErrorBox error={list.error} />
       <div className="board">
         {COLS.map(c => {
-          const items = (list.data ?? []).filter(r => c.statuses.includes(r.status)).slice(0, c.title === '완료' ? 10 : 100)
+          const items = (list.data ?? []).filter(r => c.statuses.includes(r.status)).sort(c.title === '완료' ? () => 0 : sortDue).slice(0, c.title === '완료' ? 10 : 100)
           return (
             <section key={c.title} className="board-col">
               <div className="board-head"><b>{c.title}</b> <Badge>{items.length}</Badge><small className="muted">{c.hint}</small></div>
               {items.map(r => (
                 <button key={r.id} className="board-card" onClick={() => nav(`/logistics/${r.id}`)}>
-                  <div className="bc-top"><code>{r.request_no}</code><Badge tone={LR_TONE[r.status]}>{LR_STATUS[r.status]}</Badge></div>
+                  <div className="bc-top"><code>{r.request_no}</code>{r.kind === 'RESEND' && <Badge tone="accent">재발송</Badge>}<Badge tone={LR_TONE[r.status]}>{LR_STATUS[r.status]}</Badge></div>
+                  {dueText(r) && <span className={`small ${overdue(r) ? 'overdue' : 'muted'}`}>{dueText(r)}{overdue(r) && ' · 기한 지남'}</span>}
                   <b>{r.store_name}</b>
                   <span className="small">{r.title || '—'} · {r.line_count}개 품목{r.external_count > 0 ? ` · 외부 ${r.external_count}` : ''}</span>
                   <span className="small muted">{won(r.total_amount)}원 · 요청 {dt(r.requested_at)}</span>

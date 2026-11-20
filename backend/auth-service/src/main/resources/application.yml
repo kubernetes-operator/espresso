@@ -10,6 +10,7 @@ spring:
     locations: classpath:db/migration
 app:
   token-ttl-hours: ${TOKEN_TTL_HOURS:12}
+  initial-password: ${INITIAL_PASSWORD:cafedelyon}   # 새 계정·비밀번호 초기화 시 초기 비밀번호 (첫 로그인 후 변경 안내)
   demo:
     seed: ${DEMO_SEED:true}          # 데모 계정 생성 (운영에서는 false)
     show-accounts: ${DEMO_SHOW_ACCOUNTS:true}   # 로그인 화면 계정 바로가기

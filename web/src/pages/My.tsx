@@ -21,7 +21,7 @@ export function My() {
   return (
     <Page title="내 근무·급여" sub={d?.employees?.[0] ? `${d.employees[0].store_name} · ${d.employees[0].name}` : ''}>
       <ErrorBox error={me.error || err} />
-      {d && d.employees.length === 0 && <div className="note warn">직원으로 등록되어 있지 않습니다. 인적 관리자에게 계정 연결을 요청하세요.</div>}
+      {d && d.employees.length === 0 && <div className="note warn">직원으로 등록되어 있지 않습니다. 인사 관리자에게 계정 연결을 요청하세요.</div>}
       {d && d.employees.length > 0 && <section className="card clock">
         {open ? <><div><small className="muted">출근 {dt(open.clock_in)}</small><b className="big-num">{Math.floor(mins / 60)}시간 {mins % 60}분</b></div><button className="danger big" onClick={() => clock('out')}>퇴근</button></>
           : <><div><small className="muted">출근 전</small><b className="big-num">{new Date(now).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' })}</b></div><button className="primary big" onClick={() => clock('in')}>출근</button></>}

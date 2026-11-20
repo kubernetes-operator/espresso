@@ -5,7 +5,10 @@ import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.gen.RSAKeyGenerator;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.proc.SecurityContext;
+import kr.espresso.common.ActiveUserValidator;
 import kr.espresso.common.SecuritySupport;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -36,8 +39,12 @@ public class KeyConfig {
     }
 
     @Bean
-    JwtDecoder jwtDecoder(RSAKey key) throws Exception {
-        return NimbusJwtDecoder.withPublicKey(key.toRSAPublicKey()).build();
+    JwtDecoder jwtDecoder(RSAKey key, JdbcClient db) throws Exception {
+        NimbusJwtDecoder d = NimbusJwtDecoder.withPublicKey(key.toRSAPublicKey()).build();
+        // 정지된 계정은 토큰이 남아 있어도 거부
+        d.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefault(), new ActiveUserValidator(id ->
+                db.sql("select status from auth.app_user where id = ?").param(id).query(String.class).optional().orElse(null))));
+        return d;
     }
 
     @Bean

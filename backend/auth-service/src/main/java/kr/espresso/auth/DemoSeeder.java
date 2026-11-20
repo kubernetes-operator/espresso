@@ -30,7 +30,7 @@ public class DemoSeeder implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         if (!enabled) return;
         Integer n = db.sql("select count(*) from auth.app_user").query(Integer.class).single();
-        if (n > 0) return;
+        if (n > 0) { seedBakery(); return; }
         String pw = encoder.encode("demo1234");   // 데모 전용 공통 비밀번호
         user(DemoIds.ADMIN, "admin", "최총괄", pw, "INCLUSIVE");
         user(DemoIds.LOGI, "logi", "박물류", pw, null);
@@ -59,11 +59,20 @@ public class DemoSeeder implements ApplicationRunner {
         asg(DemoIds.STAFF2, "STAFF", "STORE", DemoIds.STORE_HONGDAE);
         asg(DemoIds.INVESTOR1, "INVESTOR", "STORE", DemoIds.STORE_GANGNAM);
         log.info("demo accounts seeded (12)");
+        seedBakery();
+    }
+
+    /** 1차 점검 반영: 베이커리 매장 관리자 데모 계정 (이미 있으면 건너뜀) */
+    private void seedBakery() {
+        if (db.sql("select count(*) from auth.app_user where login_id = 'baker1'").query(Integer.class).single() > 0) return;
+        user(DemoIds.BAKER1, "baker1", "문베이커", encoder.encode("demo1234"), null);
+        asg(DemoIds.BAKER1, "STORE_MGR", "STORE", DemoIds.BAKERY_CENTRAL);
+        log.info("demo bakery account seeded");
     }
 
     private void user(UUID id, String login, String name, String hash, String vat) {
         db.sql("insert into auth.app_user(id, login_id, name, password_hash, vat_display_override) values (?,?,?,?,?)")
-                .params(id, login, name, hash, vat).update();
+                .params(id, login, name, hash, vat == null ? "EXCLUSIVE" : vat).update();
     }
 
     private void asg(UUID user, String role, String type, UUID scope) {

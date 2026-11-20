@@ -36,6 +36,9 @@ import { Investment } from './pages/Investment'
 import { Investor } from './pages/Investor'
 import { StoreWizard, StoreWizardStart } from './pages/StoreWizard'
 import { AdminPayrollRates, AdminReportSections, AdminAccounts } from './pages/AdminMisc'
+import { AdminSalaryGrades } from './pages/AdminSalaryGrades'
+import { Schedule } from './pages/Schedule'
+import { Trends } from './pages/Trends'
 
 function Guard({ children }: { children: React.ReactNode }) {
   const s = useSession()
@@ -59,6 +62,9 @@ function App() {
         <Route path="admin/stores/new" element={<StoreWizardStart />} />
         <Route path="admin/stores/wizard/:id" element={<StoreWizard />} />
         <Route path="admin/payroll-rates" element={<AdminPayrollRates />} />
+        <Route path="admin/salary-grades" element={<AdminSalaryGrades />} />
+        <Route path="schedule" element={<Schedule />} />
+        <Route path="trends" element={<Trends />} />
         <Route path="admin/report-sections" element={<AdminReportSections />} />
         <Route path="admin/accounts" element={<AdminAccounts />} />
         <Route path="admin/catalog" element={<AdminCatalog />} />

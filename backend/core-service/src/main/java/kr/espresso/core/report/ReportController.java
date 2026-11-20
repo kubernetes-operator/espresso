@@ -100,9 +100,35 @@ public class ReportController {
         if (st.isEmpty()) return List.of();
         boolean logi = u.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.OWNER), hr = u.has(Roles.HQ_ADMIN, Roles.HR_MGR, Roles.OWNER);
         List<Map<String, Object>> out = new ArrayList<>();
-        for (var s : db.sql("select s.id, s.name, s.code, r.name region_name from store.store s left join store.region r on r.id = s.region_id where s.id in (:st) order by s.code").param("st", st).query().listOfRows()) {
+        for (var s : db.sql("select s.id, s.name, s.code, r.name region_name from store.store s left join store.region r on r.id = s.region_id where s.id in (:st) and s.site_type = 'STORE' order by s.code").param("st", st).query().listOfRows()) {
             UUID id = (UUID) s.get("id");
             Map<String, Object> m = new LinkedHashMap<>(s);
+            m.putAll(metrics(id, period, ym, logi, hr));
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 비교 기준값 (점주용): 전 매장 물류·인건비 지표의 최댓값·최솟값·평균 — 매장 이름 없음 */
+    @GetMapping("/compare/benchmark")
+    public Map<String, Object> benchmark(@RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.OWNER);
+        YearMonth ym = ReportService.ym(period);
+        Map<String, List<Double>> vals = new LinkedHashMap<>();
+        int n = 0;
+        for (UUID id : db.sql("select id from store.store where site_type = 'STORE' and status = 'OPEN'").query(UUID.class).list()) {
+            n++;
+            metrics(id, period, ym, true, true).forEach((k, v) -> { if (v instanceof Number x) vals.computeIfAbsent(k, z -> new ArrayList<>()).add(x.doubleValue()); });
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        vals.forEach((k, v) -> out.put(k, Map.of("max", v.stream().mapToDouble(d -> d).max().orElse(0), "min", v.stream().mapToDouble(d -> d).min().orElse(0),
+                "avg", Math.round(v.stream().mapToDouble(d -> d).average().orElse(0) * 10) / 10.0)));
+        return Map.of("count", n, "metrics", out);
+    }
+
+    Map<String, Object> metrics(UUID id, String period, YearMonth ym, boolean logi, boolean hr) {
+            Map<String, Object> m = new LinkedHashMap<>();
             if (logi) {
                 m.putAll(db.sql("""
                         select count(*) lr_count, coalesce(sum(total_amount) filter (where status = 'COMPLETED'),0) lr_amount,
@@ -119,8 +145,6 @@ public class ReportController {
                 m.put("work_hours", db.sql("select round(coalesce(sum(regular_minutes + overtime_minutes),0) / 60.0, 1) from hr.work_record where store_id = ? and work_date between ? and ?")
                         .params(id, ym.atDay(1), ym.atEndOfMonth()).query(java.math.BigDecimal.class).single());
             }
-            out.add(m);
-        }
-        return out;
+            return m;
     }
 }

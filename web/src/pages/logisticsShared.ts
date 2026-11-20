@@ -7,3 +7,11 @@ export const LR_TONE: Record<string, any> = {
   DRAFT: 'neutral', REQUESTED: 'warn', STORE_APPROVED: 'warn', LOGISTICS_APPROVED: 'info', PURCHASED: 'info', PREPARING: 'info',
   SHIPPED: 'accent', DELIVERED: 'accent', PARTIALLY_RECEIVED: 'warn', RECEIVED: 'ok', COMPLETED: 'ok', REJECTED: 'bad', CANCELLED: 'neutral',
 }
+
+const OPEN_ST = ['DRAFT', 'REQUESTED', 'STORE_APPROVED', 'LOGISTICS_APPROVED', 'PURCHASED', 'PREPARING', 'SHIPPED', 'DELIVERED']
+/** 처리 기한(없으면 요청 기한)이 지났고 아직 진행 중인지 */
+export function overdue(r: any) {
+  const due = r.due_date ?? r.desired_date
+  return !!due && OPEN_ST.includes(r.status) && String(due).slice(0, 10) < new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
+}
+export const dueText = (r: any) => r.due_date ? `기한 ${String(r.due_date).slice(5, 10)}` : r.desired_date ? `요청 기한 ${String(r.desired_date).slice(5, 10)}` : ''

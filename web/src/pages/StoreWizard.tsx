@@ -12,7 +12,7 @@ const GUIDE: Record<number, { tip: string; check: string[] }> = {
   3: { tip: '임대 계약을 넣으면 매달 [비용 › 월세·관리비 생성]으로 자동 생성되고, 보증금은 투자금에 합산됩니다.', check: ['임대차 계약서', '월세 부가세 여부'] },
   4: { tip: '가구·냉장고·냉동고·커피머신 같은 설비는 자산으로 등록되어 매월 감가상각됩니다. 모든 항목은 매장 투자 총액에 합산됩니다.', check: ['인테리어 견적·정산', '설비 구매 증빙'] },
   5: { tip: '기본 초도 패키지를 불러와 수량을 조정하세요. 완료하면 초도 물류 요청이 자동 생성되어 물류 처리 보드로 넘어갑니다. 매장 전용 단가·할인도 여기서 정합니다.', check: ['오픈 메뉴 확정', '보관 공간(냉장·냉동) 확인'] },
-  6: { tip: '점주는 매장관리자의 상위입니다. 물류·인적 관리자는 이 매장을 담당할 사람만 고르세요(전 매장 담당자는 자동 포함).', check: ['점주 계정 생성', '매장관리자 계정 생성'] },
+  6: { tip: '점주는 매장관리자의 상위입니다. 물류·인사 관리자는 이 매장을 담당할 사람만 고르세요(전 매장 담당자는 자동 포함).', check: ['점주 계정 생성', '매장관리자 계정 생성'] },
   7: { tip: '비워 두면 문서별 기본 결재선(전체 결재)을 따릅니다. 이 매장만 다르게 하려면 단계를 넣으세요.', check: [] },
   8: { tip: '완료하면 위 내용이 한 번에 반영되고 매장 상태가 "운영"으로 바뀝니다.', check: [] },
 }
@@ -21,7 +21,7 @@ export function StoreWizardStart() {
   const nav = useNavigate()
   const regions = useApi<any[]>('/api/core/regions')
   const list = useApi<any[]>('/api/core/onboarding')
-  const [f, setF] = useState({ code: '', name: '', regionId: '', businessType: 'FRANCHISE' })
+  const [f, setF] = useState({ code: '', name: '', regionId: '', businessType: 'FRANCHISE', siteType: 'STORE' })
   const [err, setErr] = useState<string | null>(null)
   const start = async () => { setErr(null); try { const r: any = await api('/api/core/onboarding', { body: { ...f, regionId: f.regionId || null } }); nav(`/admin/stores/wizard/${r.storeId}`) } catch (e: any) { setErr(e.message) } }
   return (
@@ -32,6 +32,7 @@ export function StoreWizardStart() {
           <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
           <div><label htmlFor="sw-name">매장명</label><input id="sw-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
           <div><label htmlFor="sw-region">권역</label><select id="sw-region" value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+          <div><label htmlFor="sw-site">구분</label><select id="sw-site" value={f.siteType} onChange={e => setF({ ...f, siteType: e.target.value })}><option value="STORE">매장</option><option value="BAKERY">베이커리</option></select></div>
           <div><label htmlFor="sw-type">형태</label><select id="sw-type" value={f.businessType} onChange={e => setF({ ...f, businessType: e.target.value })}><option value="FRANCHISE">가맹</option><option value="DIRECT">직영</option></select></div>
         </div>
         {err && <div className="error-box">{err}</div>}
@@ -211,11 +212,11 @@ function Step6({ v, set }: any) {
   return (<>
     <p className="muted small">계정이 없으면 먼저 [설정 › 계정·등급]에서 만드세요. 등급이 없는 새 계정도 목록에 나옵니다.</p>
     {pick('ownerIds', '점주', ['OWNER'])}{pick('managerIds', '매장 관리자', ['STORE_MGR'])}{pick('staffIds', '일반 사원', ['STAFF'])}
-    {pick('logisticsIds', '담당 물류 관리자 (매장 지정)', ['LOGISTICS_MGR'])}{pick('hrIds', '담당 인적 관리자 (매장 지정)', ['HR_MGR'])}
+    {pick('logisticsIds', '담당 물류 관리자 (매장 지정)', ['LOGISTICS_MGR'])}{pick('hrIds', '담당 인사 관리자 (매장 지정)', ['HR_MGR'])}
   </>)
 }
 const DOCS: Record<string, string> = { LOGISTICS_REQUEST: '물류 요청', STOCK_ADJUSTMENT: '손실·결손·사용', PAYROLL_RUN: '급여 확정', EXPENSE: '비용' }
-const ROLES: Record<string, string> = { STORE_MGR: '매장 관리자', OWNER: '점주', LOGISTICS_MGR: '물류 관리자', HR_MGR: '인적 관리자', HQ_ADMIN: '총괄 관리자' }
+const ROLES: Record<string, string> = { STORE_MGR: '매장 관리자', OWNER: '점주', LOGISTICS_MGR: '물류 관리자', HR_MGR: '인사 관리자', HQ_ADMIN: '총괄 관리자' }
 function Step7({ v, set }: any) {
   const lines: any[] = v.lines ?? []
   const lineOf = (dt: string) => lines.find(l => l.docType === dt)

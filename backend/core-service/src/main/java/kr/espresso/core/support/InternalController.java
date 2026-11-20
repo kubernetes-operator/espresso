@@ -21,8 +21,17 @@ public class InternalController {
 
     @GetMapping("/stores")
     public List<Map<String, Object>> stores() {
-        return db.sql("select s.id, s.code, s.name, s.region_id, r.name region_name, s.business_type, s.biz_reg_no, s.biz_name, s.open_date, s.owner_payroll_detail_visible, s.manager_payroll_detail_visible from store.store s left join store.region r on r.id = s.region_id order by s.code")
+        return db.sql("select s.id, s.code, s.name, s.site_type, s.region_id, r.name region_name, s.business_type, s.biz_reg_no, s.biz_name, s.open_date, s.owner_payroll_detail_visible, s.manager_payroll_detail_visible from store.store s left join store.region r on r.id = s.region_id order by s.code")
                 .query().listOfRows();
+    }
+
+    /** 월별 순매출 (투자자 분석 등 settlement 내부 호출) — 결산 반영 전 과거 실적 포함 */
+    @GetMapping("/sales/monthly")
+    public List<Map<String, Object>> monthlySales(@RequestParam UUID storeId, @RequestParam String from, @RequestParam String to) {
+        return db.sql("""
+                select to_char(sales_date, 'YYYYMM') period, sum(gross_supply + exempt_supply - discount_amount - refund_amount) net_sales
+                from sales.daily_sales where store_id = ? and sales_date between to_date(?, 'YYYYMM') and (to_date(?, 'YYYYMM') + interval '1 month' - interval '1 day')
+                group by 1 order by 1""").params(storeId, from, to).query().listOfRows();
     }
 
     @GetMapping("/stores/{id}/leases")

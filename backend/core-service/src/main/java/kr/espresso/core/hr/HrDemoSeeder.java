@@ -1,6 +1,7 @@
 package kr.espresso.core.hr;
 
 import kr.espresso.common.DemoIds;
+import kr.espresso.common.Sites;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,7 +30,8 @@ public class HrDemoSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        if (!enabled || db.sql("select count(*) from hr.employee").query(Integer.class).single() > 0) return;
+        if (!enabled) return;
+        if (db.sql("select count(*) from hr.employee").query(Integer.class).single() > 0) { seedR1(); return; }
         List<Emp> emps = List.of(
                 new Emp(DemoIds.STORE_GANGNAM, DemoIds.MGR1, "김매니저", "REGULAR", "MONTHLY", 2_700_000, 40, new int[]{1, 2, 3, 4, 5}, "09:00", "18:00", 60),
                 new Emp(DemoIds.STORE_GANGNAM, DemoIds.STAFF1, "강사원", "PART_TIME", "HOURLY", 10_500, 20, new int[]{1, 3, 5, 6}, "17:00", "22:30", 30),
@@ -43,8 +45,9 @@ public class HrDemoSeeder implements ApplicationRunner {
         int i = 1, recs = 0;
         for (Emp e : emps) {
             UUID id = UUID.randomUUID();
-            db.sql("insert into hr.employee(id, user_id, store_id, emp_no, name, hire_date) values (?,?,?,?,?, date '2026-01-15')")
-                    .params(id, e.user(), e.store(), String.format("E%05d", i++), e.name()).update();
+            db.sql("insert into hr.employee(id, user_id, store_id, emp_no, name, hire_date) values (?,?,?, lpad(nextval('hr.emp_no_seq')::text, 8, '0'), ?, date '2026-01-15')")
+                    .params(id, e.user(), e.store(), e.name()).update();
+            i++;
             boolean free = e.type().equals("FREELANCER");
             db.sql("""
                     insert into hr.employment_contract(employee_id, employment_type, pay_type, base_wage, weekly_contract_hours, weekly_holiday_pay, income_tax_type,
@@ -65,5 +68,26 @@ public class HrDemoSeeder implements ApplicationRunner {
             }
         }
         log.info("demo employees seeded: {} employees, {} work records", emps.size(), recs);
+        seedR1();
+    }
+
+    /** 1차 점검 반영 데모: 본사 직원(총괄·물류·인사)과 베이커리 관리자를 연봉 등급으로 등록 (계정 연결 → 첫 화면 출퇴근) */
+    private void seedR1() {
+        if (db.sql("select count(*) from hr.employee where store_id = ?").param(Sites.HQ).query(Integer.class).single() > 0) return;
+        Object[][] list = {
+                {Sites.HQ, DemoIds.ADMIN, "최총괄", "총괄 관리자", "a5"},
+                {Sites.HQ, DemoIds.LOGI, "박물류", "물류 관리자", "l3"},
+                {Sites.HQ, DemoIds.HR, "정인사", "인사 관리자", "h3"},
+                {DemoIds.BAKERY_CENTRAL, DemoIds.BAKER1, "문베이커", "베이커리 관리자", "m2"}};
+        for (Object[] e : list) {
+            UUID id = UUID.randomUUID();
+            db.sql("insert into hr.employee(id, user_id, store_id, emp_no, name, job_title, hire_date) values (?,?,?, lpad(nextval('hr.emp_no_seq')::text, 8, '0'), ?, ?, date '2026-01-02')")
+                    .params(id, e[1], e[0], e[2], e[3]).update();
+            db.sql("""
+                    insert into hr.employment_contract(employee_id, employment_type, pay_type, base_wage, weekly_contract_hours, salary_grade, non_taxable_allowances, valid_from)
+                    select ?, 'REGULAR', 'MONTHLY', annual_salary / 12, 40, code, '{"meal":200000}'::jsonb, date '2026-01-02' from hr.salary_grade where code = ?""")
+                    .params(id, e[4]).update();
+        }
+        log.info("demo HQ/bakery employees seeded (salary grades)");
     }
 }

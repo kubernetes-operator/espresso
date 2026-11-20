@@ -49,7 +49,7 @@ public class OnboardingController {
         return m;
     }
 
-    public record StartReq(String code, String name, UUID regionId, String businessType) {}
+    public record StartReq(String code, String name, UUID regionId, String businessType, String siteType) {}
 
     @PostMapping
     public Map<String, Object> start(@RequestBody StartReq r) {
@@ -58,8 +58,9 @@ public class OnboardingController {
         if (r.code() == null || r.code().isBlank() || r.name() == null || r.name().isBlank()) throw ApiException.bad("매장 코드와 이름을 입력하세요.");
         if (db.sql("select count(*) from store.store where code = ?").param(r.code().trim()).query(Integer.class).single() > 0) throw ApiException.conflict("이미 있는 매장 코드입니다.");
         UUID id = UUID.randomUUID();
-        db.sql("insert into store.store(id, code, name, region_id, status, business_type, created_by) values (?,?,?,?, 'ONBOARDING', ?, ?)")
-                .params(id, r.code().trim(), r.name().trim(), r.regionId(), Objects.requireNonNullElse(r.businessType(), "FRANCHISE"), u.id()).update();
+        String site = "BAKERY".equals(r.siteType()) ? "BAKERY" : "STORE";   // 매장 / 베이커리 (본사는 1개 고정)
+        db.sql("insert into store.store(id, code, name, region_id, status, business_type, site_type, created_by) values (?,?,?,?, 'ONBOARDING', ?, ?, ?)")
+                .params(id, r.code().trim(), r.name().trim(), r.regionId(), "BAKERY".equals(site) ? "DIRECT" : Objects.requireNonNullElse(r.businessType(), "FRANCHISE"), site, u.id()).update();
         String init = json(Map.of("1", Map.of("code", r.code(), "name", r.name(), "regionId", Objects.toString(r.regionId(), ""), "businessType", Objects.requireNonNullElse(r.businessType(), "FRANCHISE"))));
         db.sql("insert into store.store_onboarding(store_id, current_step, step_data, started_by) values (?, 2, cast(? as jsonb), ?)").params(id, init, u.id()).update();
         return Map.of("storeId", id);

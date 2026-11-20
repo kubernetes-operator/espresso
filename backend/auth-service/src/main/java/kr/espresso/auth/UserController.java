@@ -18,14 +18,16 @@ public class UserController {
     private final JdbcClient db;
     private final PasswordEncoder encoder;
     private final ObjectMapper om;
+    private final String initialPassword;
 
-    public UserController(JdbcClient db, PasswordEncoder encoder, ObjectMapper om) {
-        this.db = db; this.encoder = encoder; this.om = om;
+    public UserController(JdbcClient db, PasswordEncoder encoder, ObjectMapper om,
+                          @org.springframework.beans.factory.annotation.Value("${app.initial-password}") String initialPassword) {
+        this.db = db; this.encoder = encoder; this.om = om; this.initialPassword = initialPassword;
     }
 
     public record AssignmentReq(@NotBlank String role, @NotBlank String scopeType, UUID scopeId) {}
     public record CreateUserReq(@NotBlank String loginId, @NotBlank String name,
-                                @NotBlank @Size(min = 8) String password, String email, String phone,
+                                String password, String email, String phone,
                                 List<AssignmentReq> assignments) {}
     public record UpdateUserReq(String name, String email, String phone, String status, String vatOverride) {}
     public record PasswordReq(@NotBlank String current, @NotBlank @Size(min = 8) String next) {}
@@ -43,24 +45,48 @@ public class UserController {
         return db.sql("select id, login_id, name from auth.app_user order by name").query().listOfRows();
     }
 
-    /** 조직 구성: 등급 트리 + 사용자별 배정. 매장 라인 사용자는 본사 인원과 자기 매장 인원만 본다. */
+    /**
+     * 조직 구성: 등급 트리 + 사용자별 배정.
+     *  - 본사 등급(총괄·물류·인사): 전체
+     *  - 매장 라인(점주·매장관리자·사원): 본사 인원 + 자기 매장 인원 + 다른 매장의 매장 관리자
+     *  - 투자자: 본사 인원 + 투자 매장 인원 (다른 투자자는 제외)
+     *  - 투자자 배정 정보는 총괄만 본다 (요구 14)
+     */
     @GetMapping("/api/auth/org")
     public Map<String, Object> org() {
         CurrentUser me = CurrentUser.get();
-        List<Map<String, Object>> users = usersWithAssignments(null);
+        List<Map<String, Object>> users = usersWithAssignments(null).stream()
+                .filter(u -> "ACTIVE".equals(u.get("status")) || me.isHqAdmin()).toList();
         boolean hqView = me.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.HR_MGR);
         if (!hqView) {
-            Set<UUID> myStores = new HashSet<>();
-            me.assignments().forEach(a -> { if ("STORE".equals(a.scopeType())) myStores.add(a.scopeId()); });
+            Set<UUID> myStores = new HashSet<>(), investStores = new HashSet<>();
+            me.assignments().forEach(a -> {
+                if (!"STORE".equals(a.scopeType())) return;
+                if (Roles.INVESTOR.equals(a.role())) investStores.add(a.scopeId()); else myStores.add(a.scopeId());
+            });
+            boolean storeLine = !myStores.isEmpty();
             users = users.stream().filter(u -> {
                 if (u.get("id").equals(me.id())) return true;
                 for (Map<String, Object> a : asgOf(u)) {
-                    String line = (String) a.get("line");
-                    if ("HQ".equals(line) && !Roles.SUPERVISOR.equals(a.get("role"))) return true;
-                    if (a.get("scopeId") != null && myStores.contains(UUID.fromString(a.get("scopeId").toString()))
-                            && !me.has(Roles.INVESTOR)) return true;
+                    String role = (String) a.get("role");
+                    if ("HQ".equals(a.get("line")) && !Roles.SUPERVISOR.equals(role)) return true;
+                    if (Roles.INVESTOR.equals(role)) continue;
+                    UUID sid = a.get("scopeId") == null ? null : UUID.fromString(a.get("scopeId").toString());
+                    if (sid == null) continue;
+                    if (myStores.contains(sid) || investStores.contains(sid)) return true;
+                    if (storeLine && Roles.STORE_MGR.equals(role)) return true;   // 다른 매장은 매장 관리자만
                 }
                 return false;
+            }).map(u -> {
+                if (u.get("id").equals(me.id())) return u;
+                // 다른 매장 배정은 매장 관리자만 남김 (점주·사원 배정 숨김)
+                Map<String, Object> c = new LinkedHashMap<>(u);
+                c.put("assignments", asgOf(u).stream().filter(a -> {
+                    if ("HQ".equals(a.get("line"))) return true;
+                    UUID sid = a.get("scopeId") == null ? null : UUID.fromString(a.get("scopeId").toString());
+                    return sid != null && (myStores.contains(sid) || investStores.contains(sid) || Roles.STORE_MGR.equals(a.get("role")));
+                }).toList());
+                return c;
             }).toList();
         }
         if (!me.isHqAdmin()) {   // 투자자 정보는 총괄만 (요구 14)
@@ -95,7 +121,7 @@ public class UserController {
 
     private List<Map<String, Object>> usersWithAssignments(UUID storeId) {
         List<Map<String, Object>> users = db.sql("""
-                select id, login_id, name, email, phone, status, vat_display_override, last_login_at, created_at
+                select id, login_id, name, email, phone, status, vat_display_override, last_login_at, created_at, initial_password, suspended_at
                 from auth.app_user order by name""").query().listOfRows();
         List<Map<String, Object>> asg = db.sql("""
                 select a.id, a.user_id, a.role_code, r.name as role_name, r.line, r.rank, r.is_active,
@@ -119,6 +145,7 @@ public class UserController {
             m.put("id", u.get("id")); m.put("loginId", u.get("login_id")); m.put("name", u.get("name"));
             m.put("email", u.get("email")); m.put("phone", u.get("phone")); m.put("status", u.get("status"));
             m.put("vatOverride", u.get("vat_display_override")); m.put("lastLoginAt", u.get("last_login_at"));
+            m.put("initialPassword", u.get("initial_password")); m.put("suspendedAt", u.get("suspended_at"));
             m.put("assignments", my);
             out.add(m);
         }
@@ -131,25 +158,48 @@ public class UserController {
         CurrentUser me = CurrentUser.get();
         me.require(Roles.HQ_ADMIN, Roles.HR_MGR);
         List<AssignmentReq> asg = req.assignments() == null ? List.of() : req.assignments();
-        if (!me.isHqAdmin()) {   // 인적관리자: 매장 라인 직원 계정만 생성
+        if (!me.isHqAdmin()) {   // 인사관리자: 매장·베이커리 직원 계정만 생성
             for (AssignmentReq a : asg)
                 if (!Set.of(Roles.STAFF, Roles.STORE_MGR).contains(a.role()))
-                    throw ApiException.forbidden("인적 관리자는 매장 관리자·일반 사원 계정만 만들 수 있습니다.");
+                    throw ApiException.forbidden("인사 관리자는 매장 관리자·일반 사원 계정만 만들 수 있습니다.");
         }
+        if (!req.loginId().matches("[A-Za-z0-9._-]{3,64}")) throw ApiException.bad("아이디는 영문·숫자·._- 3자 이상입니다.");
         Integer dup = db.sql("select count(*) from auth.app_user where login_id = ?").param(req.loginId()).query(Integer.class).single();
         if (dup > 0) throw ApiException.conflict("이미 사용 중인 아이디입니다.");
+        boolean initial = req.password() == null || req.password().isBlank();
+        if (!initial && req.password().length() < 8) throw ApiException.bad("비밀번호는 8자 이상입니다.");
         UUID id = UUID.randomUUID();
-        db.sql("insert into auth.app_user(id, login_id, name, email, phone, password_hash, created_by) values (?,?,?,?,?,?,?)")
-                .params(id, req.loginId(), req.name(), req.email(), req.phone(), encoder.encode(req.password()), me.id()).update();
+        // 비밀번호를 비우면 초기 비밀번호(app.initial-password) — 첫 로그인 후 변경 안내
+        db.sql("insert into auth.app_user(id, login_id, name, email, phone, password_hash, initial_password, created_by) values (?,?,?,?,?,?,?,?)")
+                .params(id, req.loginId(), req.name(), req.email(), req.phone(), encoder.encode(initial ? initialPassword : req.password()), initial, me.id()).update();
         for (AssignmentReq a : asg) insertAssignment(id, a, me.id());
         audit(me.id(), "USER_CREATE", id, null, Map.of("loginId", req.loginId(), "assignments", asg));
-        return Map.of("id", id);
+        return Map.of("id", id, "initialPassword", initial);
+    }
+
+    /** 비밀번호 초기화 → 초기 비밀번호 (총괄: 전체, 인사관리자: 매장 라인 계정) */
+    @PostMapping("/api/auth/users/{id}/reset-password")
+    public Map<String, Object> resetPassword(@PathVariable UUID id) {
+        CurrentUser me = CurrentUser.get();
+        me.require(Roles.HQ_ADMIN, Roles.HR_MGR);
+        if (!me.isHqAdmin()) {
+            Integer hq = db.sql("select count(*) from auth.user_role_assignment a join auth.role r on r.code = a.role_code where a.user_id = ? and r.line <> 'STORE' and (a.valid_to is null or a.valid_to >= current_date)")
+                    .param(id).query(Integer.class).single();
+            if (hq > 0) throw ApiException.forbidden("인사 관리자는 매장 라인 계정만 초기화할 수 있습니다.");
+        }
+        int n = db.sql("update auth.app_user set password_hash = ?, initial_password = true, failed_login_count = 0, updated_at = now(), updated_by = ? where id = ?")
+                .params(encoder.encode(initialPassword), me.id(), id).update();
+        if (n == 0) throw ApiException.notFound("사용자");
+        audit(me.id(), "PASSWORD_RESET", id, null, null);
+        return Map.of("reset", true);
     }
 
     @PutMapping("/api/auth/users/{id}")
     public Map<String, Object> update(@PathVariable UUID id, @RequestBody UpdateUserReq req) {
         CurrentUser me = CurrentUser.get();
         me.require(Roles.HQ_ADMIN);
+        if (id.equals(me.id()) && req.status() != null && !"ACTIVE".equals(req.status())) throw ApiException.bad("자기 계정은 정지할 수 없습니다.");
+        if (req.status() != null && !Set.of("ACTIVE", "SUSPENDED").contains(req.status())) throw ApiException.bad("상태는 ACTIVE(사용) / SUSPENDED(정지) 입니다.");
         if (req.vatOverride() != null && !Set.of("", "EXCLUSIVE", "INCLUSIVE").contains(req.vatOverride()))
             throw ApiException.bad("부가세 표시는 EXCLUSIVE(별도) / INCLUSIVE(포함) / 빈값(매장 기본) 중 하나입니다.");
         var before = db.sql("select name, email, phone, status, vat_display_override from auth.app_user where id = ?")
@@ -162,6 +212,11 @@ public class UserController {
                   updated_at = now(), updated_by = ? where id = ?""")
                 .params(req.name(), req.email(), req.phone(), req.status(),
                         req.vatOverride(), req.vatOverride(), req.vatOverride(), me.id(), id).update();
+        // 정지: 삭제하지 않고 상태만 바꿈 → 로그인 차단 + 발급된 토큰도 30초 안에 거부
+        if ("SUSPENDED".equals(req.status()))
+            db.sql("update auth.app_user set suspended_at = coalesce(suspended_at, now()), suspended_by = ? where id = ?").params(me.id(), id).update();
+        if ("ACTIVE".equals(req.status()))
+            db.sql("update auth.app_user set suspended_at = null, suspended_by = null, failed_login_count = 0 where id = ?").param(id).update();
         audit(me.id(), "USER_UPDATE", id, before.get(0), req);
         return Map.of("id", id);
     }
@@ -191,7 +246,8 @@ public class UserController {
         CurrentUser me = CurrentUser.get();
         String hash = db.sql("select password_hash from auth.app_user where id = ?").param(me.id()).query(String.class).single();
         if (!encoder.matches(req.current(), hash)) throw ApiException.bad("현재 비밀번호가 맞지 않습니다.");
-        db.sql("update auth.app_user set password_hash = ?, password_changed_at = now() where id = ?")
+        if (req.next().equals(initialPassword)) throw ApiException.bad("초기 비밀번호와 다른 비밀번호를 쓰세요.");
+        db.sql("update auth.app_user set password_hash = ?, password_changed_at = now(), initial_password = false where id = ?")
                 .params(encoder.encode(req.next()), me.id()).update();
         return Map.of("changed", true);
     }
@@ -221,6 +277,13 @@ public class UserController {
         UUID aid = insertAssignment(id, req, null);
         audit(null, "ROLE_GRANT_ONBOARDING", id, null, req);
         return Map.of("id", aid);
+    }
+
+    /** 각 서비스의 토큰 검증에서 계정 상태 확인 (정지 계정 차단) */
+    @GetMapping("/internal/users/{id}/status")
+    public Map<String, Object> status(@PathVariable UUID id) {
+        String st = db.sql("select status from auth.app_user where id = ?").param(id).query(String.class).optional().orElse("MISSING");
+        return Map.of("status", st);
     }
 
     @GetMapping("/internal/users/{id}")

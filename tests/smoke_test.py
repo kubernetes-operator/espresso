@@ -211,7 +211,162 @@ for _ in range(10):   # 손실 승인 이벤트도 Outbox 경유
     time.sleep(2)
 check("결산 구분별에 식기·포장 (손실 포함)", twd.get("loss", 0) > 0, str(twd))
 
-section("9. 게이트웨이")
+
+section("9. 1차 사용자 점검 반영 (계정=직원, 연봉 테이블, 권역, 본사·베이커리, 재발송, 근무표, 분석)")
+HQ, BK = "00000000-0000-0000-0000-0000000000a0", "22222222-0000-0000-0000-000000000010"
+ts = str(int(time.time()))[-6:]
+# 권역: 시·도 17개 기본 + 하위 권역 추가·삭제
+s, regs = req("GET", "/api/core/regions", tok("admin"))
+names = [r["name"] for r in regs] if s == 200 else []
+check("권역 기본 = 특별시·광역시·도 17개", s == 200 and len([r for r in regs if r["level"] == "SIDO"]) >= 17 and "서울특별시" in names and "제주특별자치도" in names, str(names)[:120])
+seoul = [r["id"] for r in regs if r["code"] == "SEOUL"][0]
+s, nr = req("POST", "/api/core/regions", tok("admin"), {"name": f"스모크권-{ts}", "parentId": seoul})
+check("admin 하위 권역 추가 → 삭제", s == 200 and req("DELETE", f"/api/core/regions/{nr['id']}", tok("admin"))[0] == 200, str(nr)[:80])
+check("owner1 권역 추가 불가 (403)", req("POST", "/api/core/regions", tok("owner1"), {"name": "x"})[0] == 403)
+# 사이트 구분
+s, st = req("GET", "/api/core/stores", tok("admin"))
+types = {x["site_type"] for x in st} if s == 200 else set()
+check("admin 사이트: 본사·매장·베이커리", {"HQ", "STORE", "BAKERY"} <= types, str(types))
+s, st = req("GET", "/api/core/stores", tok("owner1"))
+check("owner1 사이트에 본사 없음", s == 200 and all(x["site_type"] == "STORE" for x in st))
+s, roles = req("GET", "/api/auth/roles", tok("admin"))
+check("등급 이름: 인사 관리자", any(r["code"] == "HR_MGR" and r["name"] == "인사 관리자" for r in roles))
+# 연봉 테이블
+s, grades = req("GET", "/api/core/hr/salary-grades", tok("hr"))
+s3 = [g for g in grades if g["code"] == "s3"] if s == 200 else []
+check("연봉 테이블: 직급군별 20단계 (s1~s20, h1~h20 …)", s == 200 and len(grades) >= 120 and s3 and any(g["code"] == "h20" for g in grades))
+check("staff1 연봉 테이블 접근 불가 (403)", req("GET", "/api/core/hr/salary-grades", tok("staff1"))[0] == 403)
+# 계정 만들기 = 직원 등록 (초기 비밀번호 cafedelyon, 사번 8자리, VAT 별도 기본)
+login = f"smk{ts}"
+s, acc = req("POST", "/api/core/hr/accounts", tok("hr"), {"loginId": login, "name": "스모크신입", "site": "STORE", "role": "STAFF", "scopeId": GN,
+    "employee": {"register": True, "employmentType": "REGULAR", "salaryGrade": "s3", "weeklyHours": 40}})
+check("hr 계정 생성 → 직원 자동 등록 (사번 8자리)", s == 200 and len(str(acc.get("empNo", ""))) == 8 and acc.get("empNo", "x").isdigit(), str(acc)[:120])
+s, emps = req("GET", f"/api/core/hr/employees?storeId={GN}", tok("hr"))
+me_emp = [e for e in emps if e["user_id"] == acc.get("userId")] if s == 200 else []
+check("직원: 연봉 등급 s3 · 월급 = 연봉/12 · 주 40시간", me_emp and me_emp[0]["salary_grade"] == "s3" and me_emp[0]["base_wage"] == s3[0]["annual_salary"] // 12
+      and float(me_emp[0]["weekly_contract_hours"]) == 40, str(me_emp)[:160])
+check("사번 모두 8자리 숫자", s == 200 and all(len(e["emp_no"]) == 8 and e["emp_no"].isdigit() for e in emps))
+check("hr 는 본사 등급 계정 생성 불가 (400/403)", req("POST", "/api/core/hr/accounts", tok("hr"), {"loginId": f"x{ts}", "name": "x", "site": "HQ", "role": "LOGISTICS_MGR"})[0] in (400, 403))
+s, b = req("POST", "/api/auth/login", body={"loginId": login, "password": "cafedelyon"})
+check("초기 비밀번호 cafedelyon 로그인 + 변경 안내", s == 200 and b["user"].get("initialPassword") is True, str(b)[:100])
+new_tok = b.get("accessToken") if s == 200 else None
+s, us = req("GET", "/api/auth/users", tok("admin"))
+nu = [u for u in us if u["loginId"] == login][0]
+check("새 계정 VAT 표시 기본 = 별도", nu["vatOverride"] == "EXCLUSIVE")
+# 정지: 삭제 아님, 로그인·기존 토큰 차단 → 해제
+check("admin 계정 정지", req("PUT", f"/api/auth/users/{nu['id']}", tok("admin"), {"status": "SUSPENDED"})[0] == 200)
+s, b = req("POST", "/api/auth/login", body={"loginId": login, "password": "cafedelyon"})
+check("정지 계정 로그인 차단 (403 정지 안내)", s == 403 and b.get("code") == "ACCOUNT_SUSPENDED", str(b)[:100])
+check("정지 계정의 기존 토큰 거부 (core 401)", req("GET", "/api/core/hr/me", new_tok)[0] == 401)
+s, us = req("GET", "/api/auth/users", tok("admin"))
+check("정지 계정은 삭제되지 않고 목록에 정지 상태", any(u["loginId"] == login and u["status"] == "SUSPENDED" for u in us))
+req("PUT", f"/api/auth/users/{nu['id']}", tok("admin"), {"status": "ACTIVE"})
+check("정지 해제 후 다시 로그인", req("POST", "/api/auth/login", body={"loginId": login, "password": "cafedelyon"})[0] == 200)
+s, b = req("POST", "/api/auth/login", body={"loginId": login, "password": "cafedelyon"})
+t2 = b["accessToken"]
+check("비밀번호 변경 → 초기 비밀번호 표시 해제", req("PUT", "/api/auth/me/password", t2, {"current": "cafedelyon", "next": "smoke-pass-1"})[0] == 200
+      and req("GET", "/api/auth/me", t2)[1].get("initialPassword") is False)
+check("admin 비밀번호 초기화", req("POST", f"/api/auth/users/{nu['id']}/reset-password", tok("admin"), {})[0] == 200
+      and req("POST", "/api/auth/login", body={"loginId": login, "password": "cafedelyon"})[0] == 200)
+# 첫 화면 출퇴근 (본사 직원도)
+s, _ = req("POST", "/api/core/hr/clock-in", tok("admin"))
+check("admin(본사 직원) 출근 등록", s in (200, 409))
+check("admin 퇴근 등록", req("POST", "/api/core/hr/clock-out", tok("admin"), {"breakMinutes": 0})[0] == 200)
+# 품목 코드 자동 생성 · 본사 매입가
+coffee = [c for c in cats if c["code"] == "COFFEE"][0]
+s, ns = req("GET", f"/api/core/catalog/next-sku?categoryId={coffee['id']}", tok("logi"))
+check("품목 코드 자동 제안 (CF-0001 형식)", s == 200 and ns["sku"].startswith("CF-") and len(ns["sku"]) == 7, str(ns))
+s, it = req("POST", "/api/core/catalog/items", tok("logi"), {"name": f"스모크 원두 {ts}", "categoryId": coffee["id"], "basePrice": 20000, "hqCost": 15000})
+check("코드 비우고 품목 추가 → 자동 코드", s == 200 and it.get("sku", "").startswith("CF-"), str(it)[:80])
+check("코드 직접 수정", req("PUT", f"/api/core/catalog/items/{it.get('id')}", tok("logi"), {"sku": f"CF-SMK{ts}", "isActive": False})[0] == 200)
+s1, li = req("GET", "/api/core/catalog/items?q=CF-ETH", tok("logi")); s2, mi = req("GET", f"/api/core/catalog/items?storeId={GN}&q=CF-ETH", tok("mgr1"))
+check("본사 매입가: 물류 관리자 보임 / 매장 관리자 숨김", li[0].get("hq_cost") is not None and "hq_cost" not in mi[0])
+# 본사 재고
+s, hinv = req("GET", f"/api/core/inventory?storeId={HQ}", tok("logi"))
+eth_hq = [x for x in hinv if x["sku"] == "CF-ETH-1K"] if s == 200 else []
+check("본사 창고 재고 조회", s == 200 and eth_hq, str(hinv)[:80])
+q0 = float(eth_hq[0]["qty"]) if eth_hq else 0
+check("본사 입고 +10", req("POST", "/api/core/inventory/hq-receipts", tok("logi"), {"lines": [{"itemId": eth_hq[0]["item_id"], "qty": 10}], "memo": "스모크"})[0] == 200)
+check("mgr1 본사 재고 접근 불가 (403)", req("GET", f"/api/core/inventory?storeId={HQ}", tok("mgr1"))[0] == 403)
+# 물류: 기한 · 발송 시 본사 재고 차감 · 수령 문제 → 재발송 / 손실 처리
+s, r = req("POST", "/api/core/logistics", tok("mgr1"), {"storeId": GN, "title": "스모크 재발송", "desiredDate": (today + datetime.timedelta(days=3)).isoformat(), "submit": True,
+    "lines": [{"sourceType": "HQ", "itemId": items[0]["id"], "qty": 3}, {"sourceType": "HQ", "itemId": milk[0]["id"], "qty": 4}]})
+lr2 = r.get("id")
+ok, who = approve_all("LOGISTICS_REQUEST", lr2, ["owner1", "logi", "admin"])
+check("요청 기한 포함 물류 요청 승인", s == 200 and ok, f"{who}")
+check("logi 처리 기한 지정", req("PUT", f"/api/core/logistics/{lr2}/due-date", tok("logi"), {"dueDate": (today + datetime.timedelta(days=2)).isoformat()})[0] == 200)
+check("mgr1 처리 기한 지정 불가 (403)", req("PUT", f"/api/core/logistics/{lr2}/due-date", tok("mgr1"), {"dueDate": today.isoformat()})[0] == 403)
+req("POST", f"/api/core/logistics/{lr2}/ship", tok("logi"), {"carrier": "본사 배송"})
+s, hinv = req("GET", f"/api/core/inventory?storeId={HQ}", tok("logi"))
+q1 = float([x for x in hinv if x["sku"] == "CF-ETH-1K"][0]["qty"])
+check("발송 → 본사 재고 차감 (+10 −3)", abs(q1 - (q0 + 10 - 3)) < 1e-6, f"{q0} → {q1}")
+s, d2 = req("GET", f"/api/core/logistics/{lr2}", tok("mgr1"))
+l_eth = [l["id"] for l in d2["lines"] if l["item_name"].startswith("에티오피아")][0]
+l_milk = [l["id"] for l in d2["lines"] if l["item_name"].startswith("흰우유")][0]
+s, rc = req("POST", f"/api/core/logistics/{lr2}/receive", tok("staff1"), {"lines": [
+    {"lineId": l_eth, "receivedQty": 1, "problemType": "DAMAGED", "resolution": "RESEND"},
+    {"lineId": l_milk, "receivedQty": 3, "problemType": "SHORT", "resolution": "WRITE_OFF"}]})
+check("수령 문제: 파손 2 → 재발송, 부족 1 → 결손 초안", s == 200 and rc.get("resendRequestId") and len(rc.get("adjustmentIds", [])) == 1, str(rc)[:150])
+s, rs = req("GET", f"/api/core/logistics/{rc.get('resendRequestId')}", tok("logi"))
+check("재발송 요청: 물류 승인 상태 · 무상 · 수량 2", s == 200 and rs["kind"] == "RESEND" and rs["status"] == "LOGISTICS_APPROVED" and rs["total_amount"] == 0
+      and float(rs["lines"][0]["qty"]) == 2, str(rs)[:150] if s == 200 else str(rs))
+check("재발송 발송 → 수령 완료", req("POST", f"/api/core/logistics/{rs['id']}/ship", tok("logi"), {"carrier": "재발송"})[0] == 200
+      and req("POST", f"/api/core/logistics/{rs['id']}/receive", tok("staff1"), {"lines": []})[0] == 200)
+# 근무표
+s, sc = req("GET", f"/api/core/hr/schedule?storeId={GN}&from={today}&to={today + datetime.timedelta(days=6)}", tok("mgr1"))
+staff_emp = [e for e in sc["employees"] if e["name"] == "강사원"][0] if s == 200 else {}
+tmr = (today + datetime.timedelta(days=1)).isoformat()
+check("mgr1 근무표 입력", req("PUT", "/api/core/hr/schedule", tok("mgr1"), {"employeeId": staff_emp.get("id"), "workDate": tmr, "startTime": "09:00", "endTime": "15:00", "memo": "오픈"})[0] == 200)
+s, sc = req("GET", f"/api/core/hr/schedule?storeId={GN}&from={today}&to={today + datetime.timedelta(days=6)}", tok("staff1"))
+check("staff1 근무표 조회 (편집 불가)", s == 200 and any(i["work_date"] == tmr and i["start_time"] == "09:00" for i in sc["items"]) and sc["canEdit"] is False)
+check("staff1 근무표 편집 불가 (403)", req("PUT", "/api/core/hr/schedule", tok("staff1"), {"employeeId": staff_emp.get("id"), "workDate": tmr, "startTime": "10:00", "endTime": "11:00"})[0] == 403)
+check("owner2 강남 근무표 접근 불가 (403)", req("GET", f"/api/core/hr/schedule?storeId={GN}&from={today}&to={today}", tok("owner2"))[0] == 403)
+# 급여: 연봉 등급 · 상여금 · 퇴직금 · 전체 합산 표
+period_now = today.strftime("%Y%m")
+s, hq_emps = req("GET", f"/api/core/hr/employees?storeId={HQ}", tok("hr"))
+adm = [e for e in hq_emps if e["name"] == "최총괄"][0]
+cur_run = [x for x in req("GET", f"/api/core/payroll/runs?storeId={HQ}", tok("hr"))[1] if x["period"] == period_now]
+if not cur_run or cur_run[0]["status"] in ("DRAFT", "CALCULATED", "REJECTED"):
+    check("상여금 입력", req("PUT", "/api/core/payroll/extras", tok("hr"), {"storeId": HQ, "period": period_now, "employeeId": adm["id"], "code": "BONUS", "amount": 300000})[0] == 200)
+    s, run = req("POST", "/api/core/payroll/runs", tok("hr"), {"storeId": HQ, "period": period_now})
+    s, rd = req("GET", f"/api/core/payroll/runs/{run.get('id')}", tok("hr"))
+    slip = [p for p in rd["payslips"] if p["name"] == "최총괄"][0]
+    codes = {i["code"]: i["amount"] for i in json.loads(slip["items"])}
+    check("본사 급여: 연봉 등급 월급 + 상여금", codes.get("BONUS") == 300000 and codes.get("BASE", 0) > 0, str(codes)[:150])
+else:
+    check("상여금 입력 (이번 달 본사 급여 확정됨 → 건너뜀)", True); check("본사 급여: 연봉 등급 월급 + 상여금 (건너뜀)", True)
+s, ex = req("GET", f"/api/core/payroll/extras?storeId={HQ}&period={period_now}", tok("hr"))
+check("상여·퇴직금 입력 목록", s == 200 and any(e["name"] == "최총괄" for e in ex))
+check("mgr1 상여금 입력 불가 (403)", req("PUT", "/api/core/payroll/extras", tok("mgr1"), {"storeId": GN, "period": period_now, "employeeId": adm["id"], "code": "BONUS", "amount": 1})[0] == 403)
+s, sm = req("GET", "/api/core/payroll/summary", tok("hr"))
+check("급여 전체: 사이트별 지급 총액 표", s == 200 and len({r["store_id"] for r in sm["rows"]}) >= 3)
+s, sm = req("GET", "/api/core/payroll/summary", tok("owner2"))
+own2 = {x["id"] for x in req("GET", "/api/core/stores", tok("owner2"))[1]}
+check("owner2 급여 합산은 자기 매장만", s == 200 and PG in own2 and GN not in own2 and all(r["store_id"] in own2 for r in sm["rows"]))
+# 조직도
+s, org = req("GET", "/api/auth/org", tok("mgr1"))
+logins = {u["loginId"] for u in org["users"]}
+check("mgr1 조직도: 본사·자기 매장 + 다른 매장 매장관리자만", {"logi", "hr", "staff1", "mgr2", "mgr3"} <= logins and "staff2" not in logins and "owner2" not in logins, str(sorted(logins)))
+s, org = req("GET", "/api/auth/org", tok("investor1"))
+logins = {u["loginId"] for u in org["users"]}
+check("investor1 조직도: 본사 + 투자 매장(강남)만", {"admin", "logi", "mgr1", "staff1"} <= logins and "mgr2" not in logins and "staff2" not in logins, str(sorted(logins)))
+# 분석
+s, tr = req("GET", "/api/core/sales/trend", tok("owner1"))
+check("매출 추이: 12개월 + 1년 전 같은 달", s == 200 and len(tr["months"]) == 12 and any(m["prev_year"] for m in tr["months"]), str(tr)[:120])
+s, bm = req("GET", f"/api/stl/compare/benchmark?period={last_period}", tok("owner1"))
+check("점주 비교 기준값 (상/하위, 매장 이름 없음)", s == 200 and bm["count"] >= 3 and bm["metrics"]["net_sales"]["max"] >= bm["metrics"]["net_sales"]["min"] and "store_name" not in json.dumps(bm))
+check("staff1 비교 기준값 접근 불가 (403)", req("GET", f"/api/stl/compare/benchmark?period={last_period}", tok("staff1"))[0] == 403)
+s, it = req("GET", "/api/stl/investor/me/trend", tok("investor1"))
+check("투자자 분석: 투자 매장 12개월 매출·이익", s == 200 and it and len(it[0]["months"]) == 12 and "operating_profit" in it[0]["months"][0])
+# 투자금: 투자자 출자 / 본사 지원
+s, inv = req("POST", "/api/stl/investments", tok("admin"), {"storeId": GN, "category": "OTHER", "description": "스모크 출자", "amount": 1000, "fundingSource": "INVESTOR"})
+s2, ov = req("GET", "/api/stl/investments", tok("admin"))
+g = [x for x in ov["stores"] if x["store_id"] == GN][0]
+check("투자금: 투자자 출자 + 본사 지원 = 구성 총액", s == 200 and g["investor_total"] >= 1000 and g["investor_total"] + g["hq_total"] == g["total"]
+      and all(x["store_id"] not in (HQ, BK) for x in ov["stores"]))
+req("DELETE", f"/api/stl/investments/{inv.get('id')}", tok("admin"))
+
+section("10. 게이트웨이")
 check("웹 화면 응답", req("GET", "/login")[0] == 200)
 
 total = len(results); fails = [r for r in results if not r[0]]

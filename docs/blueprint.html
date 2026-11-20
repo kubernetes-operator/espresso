@@ -84,7 +84,7 @@ ul.tight{margin:0;padding-left:18px}
 <!-- 조직 구성도 -->
 <section id="org">
   <h2>조직 구성도</h2>
-  <p class="lead">본사 라인과 매장 라인은 총괄 관리자 아래에서 나뉩니다. 물류 관리자와 인적 관리자는 같은 단계이고, 점주는 매장 관리자보다 위에 있습니다. 투자자는 이 구조 밖에서 공개된 투자 정보만 봅니다.</p>
+  <p class="lead">본사 라인과 매장 라인은 총괄 관리자 아래에서 나뉩니다. 물류 관리자와 인사 관리자는 같은 단계이고, 점주는 매장 관리자보다 위에 있습니다. 투자자는 이 구조 밖에서 공개된 투자 정보만 봅니다.</p>
   <div class="panel org">
     <div class="node top"><b>총괄 관리자</b><small>HQ_ADMIN · 전 매장 · 최상위</small></div>
     <div class="arrow">▼</div>
@@ -93,7 +93,7 @@ ul.tight{margin:0;padding-left:18px}
         <h4>본사 라인</h4>
         <div class="row">
           <div class="node hq"><b>물류 관리자</b><small>담당 매장 물류 승인·발송·단가</small></div>
-          <div class="node hq"><b>인적 관리자</b><small>직원·근무·급여 계산·확정</small></div>
+          <div class="node hq"><b>인사 관리자</b><small>직원·근무·급여 계산·확정</small></div>
           <div class="node hq off"><b>슈퍼바이저</b><small>권역 담당 · 정의만, 비활성</small></div>
         </div>
       </div>
@@ -112,7 +112,7 @@ ul.tight{margin:0;padding-left:18px}
   <h3>데모 매장·계정 배치 (테스트용, 비밀번호 공통 <code>demo1234</code>)</h3>
   <div class="stores">
     <div class="store-card"><b>본사</b>
-      <ul class="tight"><li><code>admin</code> 총괄 관리자</li><li><code>logi</code> 물류 관리자 (전 매장)</li><li><code>hr</code> 인적 관리자 (전 매장)</li><li><code>sv</code> 슈퍼바이저 (비활성)</li></ul></div>
+      <ul class="tight"><li><code>admin</code> 총괄 관리자</li><li><code>logi</code> 물류 관리자 (전 매장)</li><li><code>hr</code> 인사 관리자 (전 매장)</li><li><code>sv</code> 슈퍼바이저 (비활성)</li></ul></div>
     <div class="store-card"><b>강남점</b> <span class="chip store">서울 권역</span>
       <ul class="tight"><li><code>owner1</code> 점주</li><li><code>mgr1</code> 매장 관리자</li><li><code>staff1</code> 일반 사원</li><li><code>investor1</code> 투자자 (공개)</li></ul></div>
     <div class="store-card"><b>홍대점</b> <span class="chip store">서울 권역</span>
@@ -216,7 +216,7 @@ sequenceDiagram
       <table><thead><tr><th>문서</th><th>결재 순서</th></tr></thead><tbody>
         <tr><td>물류 요청</td><td>매장관리자 → 점주 → 물류관리자 → 총괄</td></tr>
         <tr><td>손실·결손·내부사용</td><td>매장관리자 → 점주 → 총괄</td></tr>
-        <tr><td>급여 확정</td><td>인적관리자 → 점주 → 총괄</td></tr>
+        <tr><td>급여 확정</td><td>인사관리자 → 점주 → 총괄</td></tr>
         <tr><td>비용</td><td>매장관리자 → 점주 → 총괄</td></tr>
       </tbody></table>
       <p class="lead" style="margin-top:10px">요청자 본인 단계는 자동으로 넘어갑니다. 반려할 때는 사유가 필수입니다.</p>
@@ -230,7 +230,7 @@ sequenceDiagram
   <p class="lead">등급과 담당 매장을 함께 확인합니다. 매장이 2개 이상 배정된 계정은 상단에서 매장을 고르거나 합산으로 봅니다.</p>
   <div class="panel scroll">
     <table>
-      <thead><tr><th>기능</th><th>총괄</th><th>물류</th><th>인적</th><th>점주</th><th>매장관리자</th><th>사원</th><th>투자자</th></tr></thead>
+      <thead><tr><th>기능</th><th>총괄</th><th>물류</th><th>인사</th><th>점주</th><th>매장관리자</th><th>사원</th><th>투자자</th></tr></thead>
       <tbody>
         <tr><td>매장 생성·설정·로열티</td><td class="c">●</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
         <tr><td>물류 요청 작성</td><td class="c">●</td><td class="c">●</td><td></td><td class="c">●</td><td class="c">●</td><td class="c">●</td><td></td></tr>

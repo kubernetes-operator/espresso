@@ -24,7 +24,7 @@ export function Login() {
   return (
     <div className="login-wrap">
       <div className="login-card">
-        <div className="brand big"><span className="logo">●</span><span>Espresso</span></div>
+        <div className="brand big"><span>Cafe de Lyon</span></div>
         <p className="muted">커피숍 물류·회계 통합 시스템</p>
         <form onSubmit={e => { e.preventDefault(); go() }} className="form">
           <label htmlFor="login-id">아이디</label>
