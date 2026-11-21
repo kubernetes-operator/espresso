@@ -71,9 +71,11 @@ public class InvestmentController {
             m.put("period", period); m.put("profit", profit); m.put("share_ratio", share); m.put("calculated_amount", calc); m.put("closed", sm.get("closed"));
             m.put("investor_amount", db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ? and investor_id = ?").params(store, inv).query(Long.class).single());
             m.put("store_total", db.sql("select coalesce(sum(amount),0) from stl.investment_item where store_id = ?").param(store).query(Long.class).single());
-            var p = db.sql("select id, decided_amount, status, memo, decided_at, paid_at from stl.investor_payout where investor_id = ? and store_id = ? and period = ?")
+            var p = db.sql("select id, profit, decided_amount, status, memo, decided_at, paid_at from stl.investor_payout where investor_id = ? and store_id = ? and period = ?")
                     .params(inv, store, period).query().listOfRows();
             m.put("payout", p.isEmpty() ? null : p.get(0));
+            // 지급액 결정 뒤 수정 결산으로 결산액이 바뀐 경우 → 다시 검토 표시
+            m.put("profit_changed", !p.isEmpty() && ((Number) p.get(0).get("profit")).longValue() != profit);
             out.add(m);
         }
         return out;

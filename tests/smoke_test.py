@@ -505,7 +505,53 @@ s, us = req("GET", "/api/auth/users", tok("admin"))
 check("계정·등급 이름도 함께 바뀜", any(u["loginId"] == "staff1" and u["name"] == "강사원2" for u in us))
 req("PUT", f"/api/core/hr/employees/{st1['id']}", tok("hr"), {"name": "강사원"})
 
-section("12. 게이트웨이")
+section("12. 4차 요청: 마감 후 처리 (수정 결산)")
+d3 = (today.replace(day=1) - datetime.timedelta(days=70)).replace(day=10)   # 2~3달 전 달
+P3 = d3.strftime("%Y%m")
+s, periods = req("GET", f"/api/stl/periods?storeId={GN}", tok("admin"))
+was_closed = any(p["period"] == P3 and p["status"] == "CLOSED" for p in (periods if s == 200 else []))
+if not was_closed:
+    check(f"{P3} 월 마감", req("POST", "/api/stl/settlement/close", tok("admin"), {"storeId": GN, "period": P3})[0] == 200)
+check("마감 전 달은 마감 후 처리 불가 (409)", req("POST", "/api/stl/settlement/post-close/recalc", tok("admin"), {"storeId": GN, "period": today.strftime("%Y%m"), "memo": "x"})[0] == 409)
+base = req("GET", f"/api/stl/settlement?storeId={GN}&period={P3}", tok("admin"))[1]["stores"][0]
+s, ex = req("POST", "/api/stl/expenses", tok("mgr1"), {"storeId": GN, "expenseKind": "UTILITY", "accountCode": "815", "vendorName": "마감 후 고지서(스모크)",
+    "expenseDate": d3.isoformat(), "amount": 50000, "amountMode": "EXCLUSIVE", "submit": True})
+ok, who = approve_all("EXPENSE", ex.get("id"), ["owner1", "admin"])
+check("마감월 일자 비용 승인 (마감 후 발생)", s == 200 and ok, f"{s} {who}")
+s, pc = req("GET", f"/api/stl/settlement/post-close?storeId={GN}&period={P3}", tok("owner1"))
+late = [e for e in (pc.get("late", []) if s == 200 else []) if "마감 후 고지서" in (e.get("description") or "")]
+check("마감 후 발생 건 목록에 표시 (현재 달에 들어가 있음)", late and late[-1]["current_period"] == today.strftime("%Y%m"), str(pc)[:150])
+check("mgr1 마감 후 처리 조회 불가 (403)", req("GET", f"/api/stl/settlement/post-close?storeId={GN}&period={P3}", tok("mgr1"))[0] == 403)
+if late:
+    body = {"storeId": GN, "period": P3, "entryId": late[-1]["id"]}
+    check("owner1 반영 불가 (403)", req("POST", "/api/stl/settlement/post-close/pull", tok("owner1"), {**body, "memo": "x"})[0] == 403)
+    check("사유 없으면 거부 (400)", req("POST", "/api/stl/settlement/post-close/pull", tok("admin"), body)[0] == 400)
+    s, r = req("POST", "/api/stl/settlement/post-close/pull", tok("admin"), {**body, "memo": "고지서 늦게 수령"})
+    after = req("GET", f"/api/stl/settlement?storeId={GN}&period={P3}", tok("admin"))[1]["stores"][0]
+    check("이 달에 반영 → 공과금 +50,000 · 수정 결산 새 버전 · 마감 유지", s == 200 and after["utility"] - base["utility"] == 50000
+          and after["version"] == r["version"] and after["version"] > base.get("version", 1) and after["closed"], f"{s} {str(r)[:80]} {after.get('utility')} {base.get('utility')}")
+    pc2 = req("GET", f"/api/stl/settlement/post-close?storeId={GN}&period={P3}", tok("admin"))[1]
+    check("반영한 건은 발생 건 목록에서 빠지고 이력에 남음", not any(e["id"] == late[-1]["id"] for e in pc2["late"]) and any(a["kind"] == "LATE" for a in pc2["adjustments"]))
+    check("이미 반영한 건 다시 반영 불가 (409)", req("POST", "/api/stl/settlement/post-close/pull", tok("admin"), {**body, "memo": "x"})[0] == 409)
+    base = after
+check("조정 일자가 마감월 밖이면 거부 (400)", req("POST", "/api/stl/settlement/post-close/adjust", tok("admin"),
+      {"storeId": GN, "period": P3, "accountCode": "830", "amount": 1000, "date": today.isoformat(), "memo": "x"})[0] == 400)
+check("비손익 계정 조정 거부 (400)", req("POST", "/api/stl/settlement/post-close/adjust", tok("admin"),
+      {"storeId": GN, "period": P3, "accountCode": "103", "amount": 1000, "memo": "x"})[0] == 400)
+s, r = req("POST", "/api/stl/settlement/post-close/adjust", tok("admin"), {"storeId": GN, "period": P3, "accountCode": "401", "amount": 1000000, "counterCode": "108", "memo": "누락 카드 매출(스모크)"})
+after = req("GET", f"/api/stl/settlement?storeId={GN}&period={P3}", tok("admin"))[1]["stores"][0]
+check("직접 조정(매출 +1,000,000) → 순매출 반영 · 로열티 차액 계산", s == 200 and after["net_sales"] - base["net_sales"] == 1000000 and r.get("royalty_diff", 0) > 0
+      and after["royalty"] - base["royalty"] == r["royalty_diff"], f"{s} {str(r)[:120]}")
+s, r = req("POST", "/api/stl/settlement/post-close/adjust", tok("admin"), {"storeId": GN, "period": P3, "accountCode": "401", "amount": -1000000, "counterCode": "108", "memo": "스모크 원복"})
+back = req("GET", f"/api/stl/settlement?storeId={GN}&period={P3}", tok("admin"))[1]["stores"][0]
+check("음수 조정으로 원복 → 순매출·로열티 원래대로", s == 200 and back["net_sales"] == base["net_sales"] and back["royalty"] == base["royalty"], f"{back.get('net_sales')} {base.get('net_sales')}")
+pc3 = req("GET", f"/api/stl/settlement/post-close?storeId={GN}&period={P3}", tok("admin"))[1]
+check("결산 버전 이력 (마감 v1 포함)", len(pc3["versions"]) >= 3 and pc3["versions"][-1]["version"] == 1)
+check("발생 건 금액 = 손익 금액 (VAT 제외 50,000)", any(a["kind"] == "LATE" and a["amount"] == 50000 for a in pc3["adjustments"]))
+if not was_closed:
+    check("마감 취소 (수정 결산 로열티 차액 포함 되돌림)", req("POST", "/api/stl/settlement/reopen", tok("admin"), {"storeId": GN, "period": P3})[0] == 200)
+
+section("13. 게이트웨이")
 check("웹 화면 응답", req("GET", "/login")[0] == 200)
 
 total = len(results); fails = [r for r in results if not r[0]]
