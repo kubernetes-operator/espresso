@@ -8,7 +8,8 @@ const COLS: { title: string; statuses: string[]; hint: string }[] = [
   { title: '결재 진행', statuses: ['REQUESTED', 'STORE_APPROVED'], hint: '단가 조정 가능' },
   { title: '구매·출고 대기', statuses: ['LOGISTICS_APPROVED', 'PURCHASED', 'PREPARING'], hint: '외부 구매 → 발송 등록' },
   { title: '배송 중', statuses: ['SHIPPED', 'DELIVERED'], hint: '매장 검수 대기' },
-  { title: '완료', statuses: ['COMPLETED'], hint: '최근 완료' },
+  { title: '확인 대기', statuses: ['COMPLETED'], hint: '물류 추적에서 확인 완료' },
+  { title: '완료', statuses: ['CLOSED'], hint: '확인 완료' },
 ]
 
 export function LogisticsBoard() {

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
+import { checkRequired } from '../components/enhance'
 import { useApi, Page, Badge, ErrorBox, Toast } from '../components/ui'
 import { useSession } from '../session'
-import { won } from '../format'
+import { won, num as comma } from '../format'
 
 const STEPS = ['기본정보', '부가세·결산·로열티', '임대', '설비·투자', '초도 물류·단가', '인원', '결재선', '검토']
 const GUIDE: Record<number, { tip: string; check: string[] }> = {
@@ -29,14 +30,14 @@ export function StoreWizardStart() {
       <section className="card form">
         <h2>새 매장 시작</h2>
         <div className="row">
-          <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
-          <div><label htmlFor="sw-name">매장명</label><input id="sw-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
-          <div><label htmlFor="sw-region">권역</label><select id="sw-region" value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+          <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" required value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
+          <div><label htmlFor="sw-name">매장명</label><input id="sw-name" required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
+          <div><label htmlFor="sw-region">권역</label><select id="sw-region" required value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
           <div><label htmlFor="sw-site">구분</label><select id="sw-site" value={f.siteType} onChange={e => setF({ ...f, siteType: e.target.value })}><option value="STORE">매장</option><option value="BAKERY">베이커리</option></select></div>
           <div><label htmlFor="sw-type">형태</label><select id="sw-type" value={f.businessType} onChange={e => setF({ ...f, businessType: e.target.value })}><option value="FRANCHISE">가맹</option><option value="DIRECT">직영</option></select></div>
         </div>
         {err && <div className="error-box">{err}</div>}
-        <button className="primary" disabled={!f.code || !f.name} onClick={start}>시작</button>
+        <button className="primary" onClick={e => { const b = (e.target as HTMLElement).closest('.card, .form, div'); if (b && checkRequired((b.parentElement ?? b) as HTMLElement).length) return; start() }}>시작</button>
       </section>
       {(list.data ?? []).length > 0 && <section className="card table-wrap"><h2>진행 이력</h2>
         <table className="tbl"><thead><tr><th>매장</th><th>단계</th><th>상태</th><th></th></tr></thead>
@@ -134,7 +135,7 @@ function Step2({ v, set }: any) {
     </div>
     <div className="row">
       {['RATE', 'RATE_PLUS_FIXED'].includes(type) && <F id="w2-rate" label="요율 (%)"><input id="w2-rate" inputMode="decimal" value={v.royaltyRatePct ?? ''} onChange={e => set({ royaltyRatePct: e.target.value, royaltyRate: e.target.value ? String(Number(e.target.value) / 100) : null })} /></F>}
-      {['FIXED', 'RATE_PLUS_FIXED'].includes(type) && <F id="w2-fixed" label="정액 (원/월)"><input id="w2-fixed" inputMode="numeric" value={v.royaltyFixed ?? ''} onChange={e => set({ royaltyFixed: num(e.target.value) })} /></F>}
+      {['FIXED', 'RATE_PLUS_FIXED'].includes(type) && <F id="w2-fixed" label="정액 (원/월)"><input id="w2-fixed" inputMode="numeric" value={comma(v.royaltyFixed ?? '')} onChange={e => set({ royaltyFixed: num(e.target.value) })} /></F>}
     </div>
     <div className="chips">
       <label className="switch"><input type="checkbox" checked={v.fivePlus ?? true} onChange={e => set({ fivePlus: e.target.checked })} /><span>5인 이상 사업장 (연장·야간·휴일 가산)</span></label>
@@ -146,9 +147,9 @@ function Step3({ v, set }: any) {
   return (<>
     <F id="w3-lessor" label="임대인"><input id="w3-lessor" value={v.lessorName ?? ''} onChange={e => set({ lessorName: e.target.value })} /></F>
     <div className="row">
-      <F id="w3-dep" label="보증금"><input id="w3-dep" inputMode="numeric" value={v.deposit ?? ''} onChange={e => set({ deposit: num(e.target.value) })} /></F>
-      <F id="w3-rent" label="월세 (공급가)"><input id="w3-rent" inputMode="numeric" value={v.monthlyRent ?? ''} onChange={e => set({ monthlyRent: num(e.target.value) })} /></F>
-      <F id="w3-fee" label="관리비"><input id="w3-fee" inputMode="numeric" value={v.maintenanceFee ?? ''} onChange={e => set({ maintenanceFee: num(e.target.value) })} /></F>
+      <F id="w3-dep" label="보증금"><input id="w3-dep" inputMode="numeric" value={comma(v.deposit ?? '')} onChange={e => set({ deposit: num(e.target.value) })} /></F>
+      <F id="w3-rent" label="월세 (공급가)"><input id="w3-rent" inputMode="numeric" value={comma(v.monthlyRent ?? '')} onChange={e => set({ monthlyRent: num(e.target.value) })} /></F>
+      <F id="w3-fee" label="관리비"><input id="w3-fee" inputMode="numeric" value={comma(v.maintenanceFee ?? '')} onChange={e => set({ maintenanceFee: num(e.target.value) })} /></F>
       <F id="w3-day" label="납부일"><input id="w3-day" inputMode="numeric" value={v.paymentDay ?? '25'} onChange={e => set({ paymentDay: num(e.target.value) })} /></F>
     </div>
     <div className="row">
@@ -166,7 +167,7 @@ function Step4({ v, set }: any) {
     {items.map((x, i) => <div key={i} className="step-edit">
       <select aria-label="구분" value={x.category} onChange={e => up(i, { category: e.target.value, asset: e.target.value === 'EQUIPMENT' })}>{Object.entries(ICAT).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <input aria-label="내용" value={x.description} onChange={e => up(i, { description: e.target.value })} />
-      <input aria-label="금액" inputMode="numeric" value={x.amount} placeholder="금액" onChange={e => up(i, { amount: num(e.target.value) })} style={{ width: 140 }} />
+      <input aria-label="금액" inputMode="numeric" value={comma(x.amount)} placeholder="금액" onChange={e => up(i, { amount: num(e.target.value) })} style={{ width: 140 }} />
       <button type="button" className="ghost small" onClick={() => set({ items: items.filter((_, j) => j !== i) })}>✕</button></div>)}
     <button type="button" onClick={() => set({ items: [...items, { category: 'OTHER', description: '', amount: '' }] })}>+ 항목</button>
     <p className="small">합계 <b>{won(total)}</b>원 (임대 보증금은 3단계 값이 자동 합산)</p>

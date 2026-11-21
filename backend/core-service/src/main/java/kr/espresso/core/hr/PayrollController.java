@@ -100,6 +100,23 @@ public class PayrollController {
         return out;
     }
 
+    /** 전체(합산) 화면: 귀속월의 모든 사이트 직원별 급여 (총괄·인사 관리자·슈퍼바이저) */
+    @GetMapping("/summary/employees")
+    public List<Map<String, Object>> allEmployees(@RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HR_MGR, Roles.HQ_ADMIN);
+        Set<UUID> st = scope.allowed(u, List.of(Roles.HR_MGR, Roles.HQ_ADMIN));
+        if (st.isEmpty()) return List.of();
+        return db.sql("""
+                select p.id, s.name store_name, e.emp_no, e.name, e.job_title, c.employment_type, c.salary_grade, r.status run_status,
+                       p.gross_pay, p.total_deduction, p.net_pay, p.employer_contrib, p.severance_accrual, p.worked_minutes
+                from hr.payslip p join hr.payroll_run r on r.id = p.payroll_run_id join hr.employee e on e.id = p.employee_id
+                join store.store s on s.id = r.store_id join hr.employment_contract c on c.id = p.contract_id
+                where r.period = :p and r.store_id in (:st)
+                order by case s.site_type when 'HQ' then 0 when 'STORE' then 1 else 2 end, s.code, e.emp_no""")
+                .param("p", period).param("st", st).query().listOfRows();
+    }
+
     /** 상여금·퇴직금 입력 목록: 그 달 재직(또는 그 달 퇴사) 직원 + 퇴직금 추정치 */
     @GetMapping("/extras")
     public List<Map<String, Object>> extras(@RequestParam UUID storeId, @RequestParam String period) {

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Empty, Modal, Toast } from '../components/ui'
 import { useSession } from '../session'
-import { won, dt, DIVISIONS } from '../format'
+import { won, dt, DIVISIONS, num } from '../format'
 
 const DIV = DIVISIONS
 const REASON: Record<string, string> = { HQ_RECEIPT: '본사 입고', RECEIPT: '입고', SALE: '판매', LOSS: '손실', SHORTAGE: '결손', INTERNAL_USE: '내부사용', COUNT_ADJ: '실사 조정', TRANSFER_IN: '이동 입고', TRANSFER_OUT: '이동 출고', OPENING: '기초' }
@@ -128,7 +128,7 @@ function HqReceiptModal({ onClose, onDone }: any) {
             <div><label htmlFor={`hq-it-${i}`}>품목</label><select id={`hq-it-${i}`} value={l.itemId} onChange={e => set(i, 'itemId', e.target.value)}>
               <option value="">선택</option>{stockable.map(x => <option key={x.id} value={x.id}>{x.sku} · {x.name}</option>)}</select></div>
             <div><label htmlFor={`hq-q-${i}`}>수량</label><input id={`hq-q-${i}`} inputMode="decimal" value={l.qty} onChange={e => set(i, 'qty', e.target.value)} /></div>
-            <div><label htmlFor={`hq-c-${i}`}>단가 (원)</label><input id={`hq-c-${i}`} inputMode="numeric" value={l.unitCost} onChange={e => set(i, 'unitCost', e.target.value.replace(/\D/g, ''))} /></div>
+            <div><label htmlFor={`hq-c-${i}`}>단가 (원)</label><input id={`hq-c-${i}`} inputMode="numeric" value={num(l.unitCost)} onChange={e => set(i, 'unitCost', e.target.value.replace(/\D/g, ''))} /></div>
           </div>))}
         <button type="button" className="ghost small" onClick={() => setLines([...lines, { itemId: '', qty: '', unitCost: '' }])}>+ 품목</button>
         <label htmlFor="hq-memo">메모</label><input id="hq-memo" value={memo} placeholder="예: 11월 원두 입고 (공급처)" onChange={e => setMemo(e.target.value)} />

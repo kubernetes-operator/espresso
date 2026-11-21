@@ -23,7 +23,9 @@ public class HrDemoSeeder implements ApplicationRunner {
     private final JdbcClient db;
     private final boolean enabled;
 
-    public HrDemoSeeder(JdbcClient db, @Value("${app.demo.seed}") boolean enabled) { this.db = db; this.enabled = enabled; }
+    private final ScheduleService schedules;
+
+    public HrDemoSeeder(JdbcClient db, ScheduleService schedules, @Value("${app.demo.seed}") boolean enabled) { this.db = db; this.schedules = schedules; this.enabled = enabled; }
 
     record Emp(UUID store, UUID user, String name, String type, String pay, long wage, int weekly, int[] days, String in, String out, int brk) {}
 
@@ -31,7 +33,7 @@ public class HrDemoSeeder implements ApplicationRunner {
     @Transactional
     public void run(ApplicationArguments args) {
         if (!enabled) return;
-        if (db.sql("select count(*) from hr.employee").query(Integer.class).single() > 0) { seedR1(); return; }
+        if (db.sql("select count(*) from hr.employee").query(Integer.class).single() > 0) { seedR1(); seedR2(); return; }
         List<Emp> emps = List.of(
                 new Emp(DemoIds.STORE_GANGNAM, DemoIds.MGR1, "김매니저", "REGULAR", "MONTHLY", 2_700_000, 40, new int[]{1, 2, 3, 4, 5}, "09:00", "18:00", 60),
                 new Emp(DemoIds.STORE_GANGNAM, DemoIds.STAFF1, "강사원", "PART_TIME", "HOURLY", 10_500, 20, new int[]{1, 3, 5, 6}, "17:00", "22:30", 30),
@@ -69,13 +71,15 @@ public class HrDemoSeeder implements ApplicationRunner {
         }
         log.info("demo employees seeded: {} employees, {} work records", emps.size(), recs);
         seedR1();
+        seedR2();
     }
 
     /** 1차 점검 반영 데모: 본사 직원(총괄·물류·인사)과 베이커리 관리자를 연봉 등급으로 등록 (계정 연결 → 첫 화면 출퇴근) */
     private void seedR1() {
+        db.sql("update hr.employee set name = '장총괄' where user_id = ? and name = '최총괄'").param(DemoIds.ADMIN).update();
         if (db.sql("select count(*) from hr.employee where store_id = ?").param(Sites.HQ).query(Integer.class).single() > 0) return;
         Object[][] list = {
-                {Sites.HQ, DemoIds.ADMIN, "최총괄", "총괄 관리자", "a5"},
+                {Sites.HQ, DemoIds.ADMIN, "장총괄", "총괄 관리자", "a5"},
                 {Sites.HQ, DemoIds.LOGI, "박물류", "물류 관리자", "l3"},
                 {Sites.HQ, DemoIds.HR, "정인사", "인사 관리자", "h3"},
                 {DemoIds.BAKERY_CENTRAL, DemoIds.BAKER1, "문베이커", "베이커리 관리자", "m2"}};
@@ -89,5 +93,53 @@ public class HrDemoSeeder implements ApplicationRunner {
                     .params(id, e[4]).update();
         }
         log.info("demo HQ/bakery employees seeded (salary grades)");
+    }
+
+    /**
+     * 2차 점검 반영 데모 (가상): 슈퍼바이저 본사 직원, 매장별 아르바이트 보강(로테이션용), 매장 근무 기준,
+     * 휴무 지정 예시 후 이번 주부터 4주 자동 근무표
+     */
+    private void seedR2() {
+        if (db.sql("select count(*) from hr.schedule_setting").query(Integer.class).single() > 0) return;
+        if (db.sql("select count(*) from hr.employee where user_id = ?").param(DemoIds.SV).query(Integer.class).single() == 0)
+            emp(Sites.HQ, DemoIds.SV, "윤감독", "슈퍼바이저", "REGULAR", "MONTHLY", 0, 40, "v2");
+        Object[][] extra = {
+                {DemoIds.STORE_GANGNAM, "알바D", 10_400, 30}, {DemoIds.STORE_GANGNAM, "알바E", 10_320, 24},
+                {DemoIds.STORE_HONGDAE, "알바F", 10_400, 30}, {DemoIds.STORE_HONGDAE, "알바G", 10_320, 24}, {DemoIds.STORE_HONGDAE, "알바H", 10_320, 20},
+                {DemoIds.STORE_PANGYO, "알바I", 10_400, 30}, {DemoIds.STORE_PANGYO, "알바J", 10_320, 24},
+                {DemoIds.BAKERY_CENTRAL, "베이커K", 11_000, 40}, {DemoIds.BAKERY_CENTRAL, "베이커L", 10_800, 30}};
+        for (Object[] e : extra)
+            if (db.sql("select count(*) from hr.employee where store_id = ? and name = ?").params(e[0], e[1]).query(Integer.class).single() == 0)
+                emp((UUID) e[0], null, (String) e[1], "아르바이트", "PART_TIME", "HOURLY", ((Number) e[2]).longValue(), ((Number) e[3]).intValue(), null);
+        LocalDate monday = LocalDate.now(WorkCalc.KST).with(DayOfWeek.MONDAY);
+        for (UUID st : db.sql("select id from store.store where status = 'OPEN' and site_type in ('STORE','BAKERY','HQ')").query(UUID.class).list()) {
+            boolean bakery = DemoIds.BAKERY_CENTRAL.equals(st);
+            db.sql("insert into hr.schedule_setting(store_id, open_time, close_time, peak_start, peak_end, shift_hours, min_open, min_close, min_peak) values (?,?,?,?,?, 8, 1, 1, 2) on conflict do nothing")
+                    .params(st, bakery ? LocalTime.of(5, 0) : LocalTime.of(7, 0), bakery ? LocalTime.of(18, 0) : LocalTime.of(22, 0),
+                            bakery ? LocalTime.of(6, 0) : LocalTime.of(11, 30), bakery ? LocalTime.of(9, 0) : LocalTime.of(14, 0)).update();
+            // 휴무 지정 예시: 각 매장 첫 직원 다음 주 수요일 휴무
+            db.sql("""
+                    insert into hr.schedule_dayoff(store_id, employee_id, off_date, kind, memo)
+                    select store_id, id, ?, 'OFF', '개인 일정 (데모)' from hr.employee where store_id = ? and status = 'ACTIVE' order by emp_no limit 1 on conflict do nothing""")
+                    .params(monday.plusDays(9), st).update();
+            schedules.generate(st, monday, 4, null, DemoIds.ADMIN, "데모 자동 로테이션");
+        }
+        log.info("demo schedules seeded (4 weeks from {})", monday);
+    }
+
+    private void emp(UUID store, UUID user, String name, String title, String type, String pay, long wage, int weekly, String grade) {
+        UUID id = UUID.randomUUID();
+        db.sql("insert into hr.employee(id, user_id, store_id, emp_no, name, job_title, hire_date) values (?,?,?, lpad(nextval('hr.emp_no_seq')::text, 8, '0'), ?, ?, date '2026-02-01')")
+                .params(id, user, store, name, title).update();
+        if (grade != null)
+            db.sql("""
+                    insert into hr.employment_contract(employee_id, employment_type, pay_type, base_wage, weekly_contract_hours, salary_grade, non_taxable_allowances, valid_from)
+                    select ?, 'REGULAR', 'MONTHLY', annual_salary / 12, ?, code, '{"meal":200000}'::jsonb, date '2026-02-01' from hr.salary_grade where code = ?""")
+                    .params(id, weekly, grade).update();
+        else
+            db.sql("""
+                    insert into hr.employment_contract(employee_id, employment_type, pay_type, base_wage, weekly_contract_hours, weekly_holiday_pay, national_pension, health_insurance, employment_insurance, valid_from)
+                    values (?,?,?,?,?, ?, ?, ?, true, date '2026-02-01')""")
+                    .params(id, type, pay, wage, weekly, weekly >= 15, weekly >= 15, weekly >= 15).update();
     }
 }

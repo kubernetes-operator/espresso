@@ -23,6 +23,15 @@ export function AppShell() {
   const [pending, setPending] = useState(0)
   const [noti, setNoti] = useState<{ items: any[]; unread: number }>({ items: [], unread: 0 })
   const [notiOpen, setNotiOpen] = useState(false)
+  // 다른 화면으로 가거나 바깥을 누르면 알림 창 닫기
+  useEffect(() => { setNotiOpen(false) }, [loc.pathname])
+  useEffect(() => {
+    if (!notiOpen) return
+    const h = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.noti')) setNotiOpen(false) }
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setNotiOpen(false) }
+    document.addEventListener('mousedown', h); document.addEventListener('keydown', k)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
+  }, [notiOpen])
   useEffect(() => {
     let alive = true
     const load = () => {
@@ -37,7 +46,7 @@ export function AppShell() {
   const cur = menuFor(loc.pathname)
   const [helpOpen, setHelpOpen] = useState(false)
   const siteGroups = (['HQ', 'STORE', 'BAKERY'] as const).map(t => ({ t, list: s.stores.filter(x => (x.site_type ?? 'STORE') === t) })).filter(g => g.list.length)
-  const roleLabel = [...s.roles].map(r => ROLE_NAMES[r] ?? r).join(' · ')
+  const roleLabel = [...s.baseRoles].map(r => ROLE_NAMES[r] ?? r).join(' · ')
 
   return (
     <div className="shell">
@@ -48,7 +57,8 @@ export function AppShell() {
             <div key={g} className="nav-group">
               <div className="nav-group-label">{g}</div>
               {menu.filter(m => m.group === g).map(m => (
-                <NavLink key={m.path} to={m.path} end={m.path === '/'} className="nav-item" title={`${m.label} — ${m.desc}`}>
+                <NavLink key={m.path} to={m.path} end={m.path === '/'} title={`${m.label} — ${m.desc}`}
+                  className={() => `nav-item ${cur?.path === m.path ? 'active' : ''}`}>
                   <span className="nav-icon" aria-hidden>{m.icon}</span><span className="nav-label">{m.label}</span>
                   {m.path === '/approvals' && pending > 0 && <span className="count">{pending}</span>}
                 </NavLink>
@@ -61,7 +71,9 @@ export function AppShell() {
       <div className="main">
         <header className="topbar">
           <div className="store-picker">
-            {s.stores.length > 1 ? (
+            {cur?.fixAll && s.has(...cur.fixAll) ? (
+              <select id="store-select" aria-label="매장 선택" value="ALL" disabled title="이 화면은 전체로 고정됩니다"><option value="ALL">전체 (합산)</option></select>
+            ) : s.stores.length > 1 ? (
               <select id="store-select" aria-label="매장 선택" value={s.storeId} onChange={e => s.setStoreId(e.target.value)}>
                 {siteGroups.map(g => <optgroup key={g.t} label={SITE_TYPES[g.t]}>
                   {g.list.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}

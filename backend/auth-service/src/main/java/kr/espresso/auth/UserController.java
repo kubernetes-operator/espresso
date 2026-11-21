@@ -57,7 +57,7 @@ public class UserController {
         CurrentUser me = CurrentUser.get();
         List<Map<String, Object>> users = usersWithAssignments(null).stream()
                 .filter(u -> "ACTIVE".equals(u.get("status")) || me.isHqAdmin()).toList();
-        boolean hqView = me.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.HR_MGR);
+        boolean hqView = me.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.HR_MGR, Roles.SUPERVISOR);
         if (!hqView) {
             Set<UUID> myStores = new HashSet<>(), investStores = new HashSet<>();
             me.assignments().forEach(a -> {
@@ -69,7 +69,7 @@ public class UserController {
                 if (u.get("id").equals(me.id())) return true;
                 for (Map<String, Object> a : asgOf(u)) {
                     String role = (String) a.get("role");
-                    if ("HQ".equals(a.get("line")) && !Roles.SUPERVISOR.equals(role)) return true;
+                    if ("HQ".equals(a.get("line"))) return true;
                     if (Roles.INVESTOR.equals(role)) continue;
                     UUID sid = a.get("scopeId") == null ? null : UUID.fromString(a.get("scopeId").toString());
                     if (sid == null) continue;
@@ -277,6 +277,19 @@ public class UserController {
         UUID aid = insertAssignment(id, req, null);
         audit(null, "ROLE_GRANT_ONBOARDING", id, null, req);
         return Map.of("id", aid);
+    }
+
+    /** 직원 이름 변경을 계정 이름에도 반영 (core 인사 → auth) */
+    @PutMapping("/internal/users/{id}/name")
+    public Map<String, Object> rename(@PathVariable UUID id, @RequestBody Map<String, String> b) {
+        String name = b.get("name");
+        if (name == null || name.isBlank()) throw ApiException.bad("이름을 입력하세요.");
+        var before = db.sql("select name from auth.app_user where id = ?").param(id).query(String.class).optional();
+        if (before.isEmpty()) throw ApiException.notFound("사용자");
+        if (before.get().equals(name.trim())) return Map.of("changed", false);
+        db.sql("update auth.app_user set name = ?, updated_at = now() where id = ?").params(name.trim(), id).update();
+        audit(null, "USER_RENAME_FROM_HR", id, Map.of("name", before.get()), Map.of("name", name.trim()));
+        return Map.of("changed", true);
     }
 
     /** 각 서비스의 토큰 검증에서 계정 상태 확인 (정지 계정 차단) */

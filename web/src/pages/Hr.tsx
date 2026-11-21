@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast, Empty } from '../components/ui'
 import { useSession } from '../session'
-import { won, dt } from '../format'
+import { won, dt, num } from '../format'
 
 export const EMP_TYPE: Record<string, string> = { REGULAR: '정규직', CONTRACT: '계약직', PART_TIME: '아르바이트', FREELANCER: '프리랜서(3.3%)' }
 const thisMonth = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7)
@@ -71,6 +71,7 @@ export function Hr() {
           </table>
         </div>
       </>)}
+      {all && tab === 'emp' && s.has('HQ_ADMIN', 'HR_MGR') && <Unregistered emps={emps.data ?? []} />}
       {all && <p className="muted small">전체 화면은 사이트별 목록입니다. 직원 추가·근무 입력은 상단에서 매장(또는 본사·베이커리)을 고르세요.</p>}
       {edit && <EmpModal emp={edit} storeId={edit.store_id ?? storeId} onClose={() => setEdit(null)} onDone={() => { setEdit(null); setMsg('저장했습니다'); emps.reload() }} />}
       {addWork && <WorkModal emps={emps.data ?? []} onClose={() => setAddWork(false)} onDone={() => { setAddWork(false); setMsg('근무를 입력했습니다'); work.reload() }} />}
@@ -108,9 +109,9 @@ function EmpModal({ emp, storeId, onClose, onDone }: any) {
     <Modal title={isNew ? '직원 등록' : `직원 수정 · ${emp.name} (${emp.emp_no})`} onClose={onClose} wide>
       <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
         <div className="row">
-          <div><label htmlFor="em-name">이름</label><input id="em-name" value={f.name} onChange={e => set('name', e.target.value)} /></div>
+          <div><label htmlFor="em-name">이름</label><input id="em-name" required value={f.name} onChange={e => set('name', e.target.value)} /></div>
           <div><label htmlFor="em-title">직책</label><input id="em-title" value={f.jobTitle} placeholder="예: 사원" onChange={e => set('jobTitle', e.target.value)} /></div>
-          <div><label htmlFor="em-hire">입사일</label><input id="em-hire" type="date" value={f.hireDate} disabled={!isNew} onChange={e => set('hireDate', e.target.value)} /></div>
+          <div><label htmlFor="em-hire">입사일</label><input id="em-hire" required type="date" value={f.hireDate} disabled={!isNew} onChange={e => set('hireDate', e.target.value)} /></div>
           <div><label htmlFor="em-user">앱 계정 연결</label><select id="em-user" value={f.userId} onChange={e => set('userId', e.target.value)}><option value="">없음</option>{(users.data ?? []).map(u => <option key={u.id} value={u.id}>{u.name} ({u.loginId})</option>)}</select></div>
         </div>
         {isNew && <p className="muted small">사번은 저장할 때 자동으로 붙습니다 (00000001부터 연번).</p>}
@@ -118,18 +119,18 @@ function EmpModal({ emp, storeId, onClose, onDone }: any) {
           <div><label htmlFor="em-type">고용형태</label><select id="em-type" value={f.employmentType} onChange={e => set('employmentType', e.target.value)}>{Object.entries(EMP_TYPE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
           <div><label htmlFor="em-pay">급여 방식</label><select id="em-pay" value={f.payType} onChange={e => set('payType', e.target.value)}><option value="GRADE">연봉 등급</option><option value="HOURLY">시급</option><option value="MONTHLY">월급(직접 입력)</option></select></div>
           {f.payType === 'GRADE' ? <div><label htmlFor="em-grade">연봉 등급</label>
-            <select id="em-grade" value={f.salaryGrade} onChange={e => set('salaryGrade', e.target.value)}>
+            <select id="em-grade" required value={f.salaryGrade} onChange={e => set('salaryGrade', e.target.value)}>
               <option value="">선택</option>
-              {groups.map(([g, n]) => <optgroup key={g} label={`${n} (${g}1~)`}>{(grades.data ?? []).filter(x => x.grade_group === g).map(x => <option key={x.code} value={x.code}>{x.code} · 연 {won(x.annual_salary)}</option>)}</optgroup>)}
+              {groups.map(([g, n]) => <optgroup key={g} label={`${n} (${g}1~)`}>{(grades.data ?? []).filter(x => x.grade_group === g).map(x => <option key={x.code} value={x.code}>{x.code} · {g === 'f' ? `월 ${won(x.monthly)}` : `연 ${won(x.annual_salary)}`}</option>)}</optgroup>)}
             </select></div>
-            : <div><label htmlFor="em-wage">{f.payType === 'HOURLY' ? '시급' : '월급'} (원)</label><input id="em-wage" inputMode="numeric" value={f.baseWage} onChange={e => set('baseWage', e.target.value.replace(/\D/g, ''))} /></div>}
-          <div><label htmlFor="em-wh">주 소정근로 (시간)</label><input id="em-wh" inputMode="decimal" value={f.weeklyHours} onChange={e => set('weeklyHours', e.target.value)} /></div>
+            : <div><label htmlFor="em-wage">{f.payType === 'HOURLY' ? '시급' : '월급'} (원)</label><input id="em-wage" required inputMode="numeric" value={num(f.baseWage)} onChange={e => set('baseWage', e.target.value.replace(/\D/g, ''))} /></div>}
+          <div><label htmlFor="em-wh">주 소정근로 (시간)</label><input id="em-wh" required inputMode="decimal" value={f.weeklyHours} onChange={e => set('weeklyHours', e.target.value)} /></div>
         </div>
         {f.payType === 'GRADE' && grade && <div className="note">연봉 <b>{won(grade.annual_salary)}원</b> · 월 급여 <b>{won(grade.monthly)}원</b> ({grade.group_name} {grade.step}단계)</div>}
         {f.employmentType !== 'FREELANCER' && <div className="chips">{chk('weeklyHolidayPay', '주휴수당')}{chk('nationalPension', '국민연금')}{chk('healthInsurance', '건강보험')}{chk('employmentInsurance', '고용보험')}</div>}
         <div className="row">
           <div><label htmlFor="em-dep">부양가족 수 (소득세)</label><input id="em-dep" inputMode="numeric" value={f.taxDependents} onChange={e => set('taxDependents', e.target.value)} /></div>
-          <div><label htmlFor="em-meal">식대 비과세 (원/월)</label><input id="em-meal" inputMode="numeric" value={f.mealAllowance} onChange={e => set('mealAllowance', e.target.value.replace(/\D/g, ''))} /></div>
+          <div><label htmlFor="em-meal">식대 비과세 (원/월)</label><input id="em-meal" inputMode="numeric" value={num(f.mealAllowance)} onChange={e => set('mealAllowance', e.target.value.replace(/\D/g, ''))} /></div>
           {!isNew && <div><label htmlFor="em-st">상태</label><select id="em-st" value={f.status} onChange={e => set('status', e.target.value)}><option value="ACTIVE">재직</option><option value="LEAVE">휴직</option><option value="RESIGNED">퇴사</option></select></div>}
           {!isNew && f.status === 'RESIGNED' && <div><label htmlFor="em-resign">퇴사일</label><input id="em-resign" type="date" value={f.resignDate} onChange={e => set('resignDate', e.target.value)} /></div>}
         </div>
@@ -137,7 +138,7 @@ function EmpModal({ emp, storeId, onClose, onDone }: any) {
         {etc.map((x, i) => (
           <div key={i} className="allow-row">
             <input aria-label="항목 이름" placeholder="예: 자가운전보조금" value={x.name} onChange={e => setEtc(etc.map((y, j) => j === i ? { ...y, name: e.target.value } : y))} />
-            <input aria-label="월 금액" inputMode="numeric" placeholder="원/월" value={x.amount} onChange={e => setEtc(etc.map((y, j) => j === i ? { ...y, amount: e.target.value.replace(/\D/g, '') } : y))} />
+            <input aria-label="월 금액" inputMode="numeric" placeholder="원/월" value={num(x.amount)} onChange={e => setEtc(etc.map((y, j) => j === i ? { ...y, amount: e.target.value.replace(/\D/g, '') } : y))} />
             <button type="button" className="ghost small" aria-label="항목 삭제" onClick={() => setEtc(etc.filter((_, j) => j !== i))}>✕</button>
           </div>))}
         <button type="button" className="ghost small" onClick={() => setEtc([...etc, { name: '', amount: '' }])}>+ 기타 항목</button>
@@ -156,10 +157,10 @@ function WorkModal({ emps, onClose, onDone }: any) {
   return (
     <Modal title="근무 입력" onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); save() }}>
-        <label htmlFor="wk-emp">직원</label><select id="wk-emp" value={f.employeeId} onChange={e => setF({ ...f, employeeId: e.target.value })}>{emps.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
-        <label htmlFor="wk-date">일자</label><input id="wk-date" type="date" value={f.workDate} onChange={e => setF({ ...f, workDate: e.target.value })} />
+        <label htmlFor="wk-emp">직원</label><select id="wk-emp" required value={f.employeeId} onChange={e => setF({ ...f, employeeId: e.target.value })}>{emps.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
+        <label htmlFor="wk-date">일자</label><input id="wk-date" required type="date" value={f.workDate} onChange={e => setF({ ...f, workDate: e.target.value })} />
         <div className="row">
-          <div><label htmlFor="wk-in">출근</label><input id="wk-in" type="time" value={f.clockIn} onChange={e => setF({ ...f, clockIn: e.target.value })} /></div>
+          <div><label htmlFor="wk-in">출근</label><input id="wk-in" required type="time" value={f.clockIn} onChange={e => setF({ ...f, clockIn: e.target.value })} /></div>
           <div><label htmlFor="wk-out">퇴근 (자정 넘으면 다음날로 계산)</label><input id="wk-out" type="time" value={f.clockOut} onChange={e => setF({ ...f, clockOut: e.target.value })} /></div>
           <div><label htmlFor="wk-brk">휴게 (분)</label><input id="wk-brk" inputMode="numeric" value={f.breakMinutes} onChange={e => setF({ ...f, breakMinutes: e.target.value })} /></div>
         </div>
@@ -168,5 +169,20 @@ function WorkModal({ emps, onClose, onDone }: any) {
         <button className="primary">저장</button>
       </form>
     </Modal>
+  )
+}
+
+/** 전체(합산): 계정은 있지만 직원으로 등록되지 않은 사람 (투자자 제외) — 총괄·인사 관리자 */
+function Unregistered({ emps }: { emps: any[] }) {
+  const users = useApi<any[]>('/api/auth/users')
+  const linked = new Set(emps.map(e => e.user_id).filter(Boolean))
+  const list = (users.data ?? []).filter(u => !linked.has(u.id) && u.status === 'ACTIVE' && !u.assignments.every((a: any) => a.role === 'INVESTOR'))
+  if (!list.length) return null
+  return (
+    <section className="card">
+      <h2>직원 미등록 계정 <Badge tone="warn">{list.length}</Badge></h2>
+      <p className="muted small">점주 등 계정만 있는 사람입니다. 직원으로 관리하려면 상단에서 소속 매장을 고르고 [+ 직원]에서 "앱 계정 연결"로 등록하세요.</p>
+      <div className="chips">{list.map(u => <span key={u.id} className="chip">{u.name} <code>{u.loginId}</code> · {u.assignments.map((a: any) => a.roleName).join(', ')}</span>)}</div>
+    </section>
   )
 }

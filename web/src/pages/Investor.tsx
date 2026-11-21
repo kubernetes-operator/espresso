@@ -15,10 +15,15 @@ export function Investor() {
             <h2>{x.store_name} <Badge tone="accent">{x.mode === 'RATIO' ? `지분 ${Number(x.ratio) * 100}%` : x.mode === 'FIXED_AMOUNT' ? '지정액' : '총액'}</Badge></h2>
             <div className="grid3">
               <div className="stat"><small>투자 금액</small><b className="tnum">{won(x.amount)}원</b>
-                {x.investor_total != null && <span className="muted small">투자자 출자 {won(x.investor_total)} + 본사 지원 {won(x.hq_total)}</span>}</div>
+                {x.investor_total != null && <span className="muted small">투자자 출자 {won(x.investor_total)} + 본사 지원 {won(x.hq_total)}</span>}
+                {x.profit_share_ratio != null && <span className="muted small">이익금 배분 비율 {(Number(x.profit_share_ratio) * 100).toFixed(2)}% (내 출자 {won(x.my_investment)}원 ÷ 매장 구성 총액)</span>}</div>
               {x.cumulative_settlement != null && <div className="stat"><small>누적 결산 (내 몫)</small><b className="tnum">{won(x.cumulative_settlement)}원</b></div>}
               {x.recovery_rate != null && <div className="stat"><small>회수율</small><b>{x.recovery_rate}%</b><div className="bar"><span style={{ width: `${Math.min(100, x.recovery_rate)}%` }} /></div></div>}
             </div>
+            {x.payouts?.length > 0 && <div className="table-wrap" style={{ marginTop: 12 }}><h3>지급 내역</h3><table className="tbl compact">
+              <thead><tr><th>귀속월</th><th className="num">지급액</th><th>상태</th></tr></thead>
+              <tbody>{x.payouts.map((p: any) => <tr key={p.period}><td>{p.period.slice(0, 4)}-{p.period.slice(4)}</td><td className="num">{won(p.decided_amount)}</td>
+                <td><Badge tone={p.status === 'PAID' ? 'ok' : 'info'}>{p.status === 'PAID' ? '지급 완료' : '지급 예정'}</Badge></td></tr>)}</tbody></table></div>}
             <TrendCharts trend={(t.data ?? []).find((y: any) => y.store_id === x.store_id)} />
           </section>
         )

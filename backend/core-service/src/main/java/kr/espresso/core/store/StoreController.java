@@ -119,4 +119,70 @@ public class StoreController {
             db.sql("update store.store set settings = settings || jsonb_build_object('fivePlus', ?) where id = ?").params(req.fivePlus(), id).update();
         return Map.of("id", id);
     }
+
+    // ---------------- 임대 계약 (월세·관리비, 기간 필수, 수정 가능) ----------------
+    public record LeaseReq(String lessorName, Long deposit, Long monthlyRent, Long maintenanceFee, String rentVatType,
+                           Integer paymentDay, String startDate, String endDate, String memo) {}
+
+    void requireLeaseEditor(CurrentUser u, UUID store) {
+        scope.check(u, store);
+        if (!u.isHqAdmin() && !scope.hasRoleOn(u, store, Roles.OWNER)) throw ApiException.forbidden("임대 계약은 총괄·점주만 바꿀 수 있습니다.");
+    }
+
+    @GetMapping("/stores/{id}/leases")
+    public List<Map<String, Object>> leases(@PathVariable UUID id) {
+        CurrentUser u = CurrentUser.get();
+        scope.check(u, id);
+        return db.sql("select * from store.store_lease where store_id = ? order by start_date desc").param(id).query().listOfRows();
+    }
+
+    void saveLease(UUID leaseId, UUID store, LeaseReq r, boolean create) {
+        if (r.startDate() == null || r.startDate().isBlank() || r.endDate() == null || r.endDate().isBlank()) throw ApiException.bad("계약 기간(시작일·종료일)을 입력하세요.");
+        java.time.LocalDate a = java.time.LocalDate.parse(r.startDate()), b = java.time.LocalDate.parse(r.endDate());
+        if (b.isBefore(a)) throw ApiException.bad("종료일이 시작일보다 빠릅니다.");
+        if (r.monthlyRent() == null || r.monthlyRent() < 0) throw ApiException.bad("월세를 입력하세요 (없으면 0).");
+        if (r.paymentDay() != null && (r.paymentDay() < 1 || r.paymentDay() > 31)) throw ApiException.bad("납부일은 1~31일입니다.");
+        int overlap = db.sql("select count(*) from store.store_lease where store_id = ? and id <> coalesce(cast(? as uuid), gen_random_uuid()) and start_date <= ? and coalesce(end_date, date '9999-12-31') >= ?")
+                .params(store, leaseId, b, a).query(Integer.class).single();
+        if (overlap > 0) throw ApiException.conflict("기간이 겹치는 임대 계약이 있습니다. 기존 계약의 종료일을 먼저 바꾸세요.");
+        String vat = "EXEMPT".equals(r.rentVatType()) ? "EXEMPT" : "TAXABLE";
+        if (create)
+            db.sql("""
+                    insert into store.store_lease(store_id, lessor_name, deposit, monthly_rent, maintenance_fee, rent_vat_type, payment_day, start_date, end_date, memo)
+                    values (?,?,?,?,?,?,?,?,?,?)""")
+                    .params(store, r.lessorName(), Objects.requireNonNullElse(r.deposit(), 0L), r.monthlyRent(), Objects.requireNonNullElse(r.maintenanceFee(), 0L),
+                            vat, r.paymentDay(), a, b, r.memo()).update();
+        else
+            db.sql("""
+                    update store.store_lease set lessor_name = ?, deposit = ?, monthly_rent = ?, maintenance_fee = ?, rent_vat_type = ?, payment_day = ?,
+                      start_date = ?, end_date = ?, memo = ? where id = ?""")
+                    .params(r.lessorName(), Objects.requireNonNullElse(r.deposit(), 0L), r.monthlyRent(), Objects.requireNonNullElse(r.maintenanceFee(), 0L),
+                            vat, r.paymentDay(), a, b, r.memo(), leaseId).update();
+    }
+
+    @PostMapping("/stores/{id}/leases")
+    public Map<String, Object> addLease(@PathVariable UUID id, @RequestBody LeaseReq r) {
+        CurrentUser u = CurrentUser.get();
+        requireLeaseEditor(u, id);
+        saveLease(null, id, r, true);
+        return Map.of("ok", true);
+    }
+
+    @PutMapping("/stores/leases/{leaseId}")
+    public Map<String, Object> updateLease(@PathVariable UUID leaseId, @RequestBody LeaseReq r) {
+        CurrentUser u = CurrentUser.get();
+        UUID store = db.sql("select store_id from store.store_lease where id = ?").param(leaseId).query(UUID.class).optional().orElseThrow(() -> ApiException.notFound("임대 계약"));
+        requireLeaseEditor(u, store);
+        saveLease(leaseId, store, r, false);
+        return Map.of("ok", true);
+    }
+
+    @DeleteMapping("/stores/leases/{leaseId}")
+    public Map<String, Object> deleteLease(@PathVariable UUID leaseId) {
+        CurrentUser u = CurrentUser.get();
+        UUID store = db.sql("select store_id from store.store_lease where id = ?").param(leaseId).query(UUID.class).optional().orElseThrow(() -> ApiException.notFound("임대 계약"));
+        requireLeaseEditor(u, store);
+        db.sql("delete from store.store_lease where id = ?").param(leaseId).update();
+        return Map.of("ok", true);
+    }
 }

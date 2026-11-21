@@ -50,7 +50,7 @@ export function ReportView() {
   const r = d.data
   if (!r) return <Page title="리포트"><ErrorBox error={d.error} /></Page>
   const S = r.sections
-  const roleLabel = [...s.roles].map(x => ROLE_NAMES[x]).join(' · ')
+  const roleLabel = [...s.baseRoles].map(x => ROLE_NAMES[x]).join(' · ')
   const kpi = S.KPI
   return (
     <div className="report-wrap">

@@ -28,7 +28,19 @@ public class Ledger {
     public UUID post(UUID store, LocalDate date, String sourceType, UUID sourceId, String desc, List<Line> lines, UUID actor) {
         String period = period(date);
         boolean adj = isClosed(store, period);
-        if (adj) { date = LocalDate.now(); period = period(date); }   // 마감 후 발생분은 현재 기간 조정 분개
+        LocalDate origDate = null; String origPeriod = null;
+        if (adj) { origDate = date; origPeriod = period; date = LocalDate.now(); period = period(date); }   // 마감 후 발생분은 현재 기간 조정 분개 (원래 일자는 남겨 마감월에서 반영 가능)
+        return insert(store, date, period, adj, origDate, origPeriod, sourceType, sourceId, desc, lines, actor);
+    }
+
+    /** 마감 후 처리: 지정 일자(마감 기간 포함)에 그대로 기록. 마감 기간이면 조정 분개로 표시 */
+    public UUID postInto(UUID store, LocalDate date, String sourceType, UUID sourceId, String desc, List<Line> lines, UUID actor) {
+        String period = period(date);
+        return insert(store, date, period, isClosed(store, period), null, null, sourceType, sourceId, desc, lines, actor);
+    }
+
+    UUID insert(UUID store, LocalDate date, String period, boolean adj, LocalDate origDate, String origPeriod,
+                String sourceType, UUID sourceId, String desc, List<Line> lines, UUID actor) {
         List<Line> ls = lines.stream().filter(l -> l.debit() != 0 || l.credit() != 0).map(l -> {
             // 음수 금액은 반대 변으로
             if (l.debit() < 0) return new Line(l.account(), 0, -l.debit(), l.division(), l.memo());
@@ -39,8 +51,8 @@ public class Ledger {
         if (dr != cr) throw new ApiException(500, "UNBALANCED", "분개 차대 불일치 " + dr + " / " + cr + " (" + desc + ")");
         if (ls.isEmpty()) return null;
         UUID id = UUID.randomUUID();
-        db.sql("insert into stl.journal_entry(id, store_id, entry_date, period, source_type, source_id, description, is_adjustment, created_by) values (?,?,?,?,?,?,?,?,?)")
-                .params(id, store, date, period, sourceType, sourceId, desc, adj, actor).update();
+        db.sql("insert into stl.journal_entry(id, store_id, entry_date, period, source_type, source_id, description, is_adjustment, created_by, orig_date, orig_period) values (?,?,?,?,?,?,?,?,?,?,?)")
+                .params(id, store, date, period, sourceType, sourceId, desc, adj, actor, origDate, origPeriod).update();
         for (Line l : ls)
             db.sql("insert into stl.journal_line(entry_id, entry_date, store_id, period, account_code, debit, credit, division_code, memo) values (?,?,?,?,?,?,?,?,?)")
                     .params(id, date, store, period, l.account(), l.debit(), l.credit(), l.division(), l.memo()).update();

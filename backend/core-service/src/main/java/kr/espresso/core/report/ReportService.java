@@ -37,12 +37,12 @@ public class ReportService {
         d.put("PNL", pick(s, "net_sales", "cogs", "opening_stock", "purchases", "closing_stock", "gross_profit", "labor", "rent", "utility", "internal_use", "operating_exp", "stock_loss", "depreciation", "operating_profit"));
         d.put("DIVISION", s.getOrDefault("by_division", Map.of()));
         d.put("LOGISTICS", db.sql("""
-                select count(*) total, count(*) filter (where status = 'COMPLETED') completed,
-                  count(*) filter (where status not in ('COMPLETED','CANCELLED','REJECTED','DRAFT')) open,
+                select count(*) total, count(*) filter (where status in ('COMPLETED','CLOSED')) completed,
+                  count(*) filter (where status not in ('COMPLETED','CLOSED','CANCELLED','REJECTED','DRAFT')) open,
                   round(avg(extract(epoch from completed_at - requested_at) / 3600) filter (where completed_at is not null)::numeric, 1) lead_hours,
-                  coalesce(sum(total_amount) filter (where status = 'COMPLETED'), 0) completed_amount,
+                  coalesce(sum(total_amount) filter (where status in ('COMPLETED','CLOSED')), 0) completed_amount,
                   coalesce((select sum(l.total_amount) from logistics.request_line l join logistics.request r2 on r2.id = l.request_id
-                    where r2.store_id = :s and r2.status = 'COMPLETED' and l.source_type = 'EXTERNAL' and r2.completed_at::date between :f and :t), 0) external_amount
+                    where r2.store_id = :s and r2.status in ('COMPLETED','CLOSED') and l.source_type = 'EXTERNAL' and r2.completed_at::date between :f and :t), 0) external_amount
                 from logistics.request where store_id = :s and created_at::date between :f and :t""")
                 .param("s", store).param("f", from).param("t", to).query().singleRow());
         Map<String, Object> stock = new LinkedHashMap<>();

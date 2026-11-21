@@ -32,7 +32,7 @@ public class DemoSeeder implements ApplicationRunner {
         Integer n = db.sql("select count(*) from auth.app_user").query(Integer.class).single();
         if (n > 0) { seedBakery(); return; }
         String pw = encoder.encode("demo1234");   // 데모 전용 공통 비밀번호
-        user(DemoIds.ADMIN, "admin", "최총괄", pw, "INCLUSIVE");
+        user(DemoIds.ADMIN, "admin", "장총괄", pw, "INCLUSIVE");
         user(DemoIds.LOGI, "logi", "박물류", pw, null);
         user(DemoIds.HR, "hr", "정인사", pw, null);
         user(DemoIds.SV, "sv", "윤감독", pw, null);
@@ -64,6 +64,8 @@ public class DemoSeeder implements ApplicationRunner {
 
     /** 1차 점검 반영: 베이커리 매장 관리자 데모 계정 (이미 있으면 건너뜀) */
     private void seedBakery() {
+        // 2차 점검 반영: 총괄 관리자 표시 이름 변경 (가상 이름)
+        db.sql("update auth.app_user set name = '장총괄' where id = ? and name = '최총괄'").param(DemoIds.ADMIN).update();
         if (db.sql("select count(*) from auth.app_user where login_id = 'baker1'").query(Integer.class).single() > 0) return;
         user(DemoIds.BAKER1, "baker1", "문베이커", encoder.encode("demo1234"), null);
         asg(DemoIds.BAKER1, "STORE_MGR", "STORE", DemoIds.BAKERY_CENTRAL);

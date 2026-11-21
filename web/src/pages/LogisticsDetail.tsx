@@ -4,7 +4,7 @@ import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast } from '../components/ui'
 import { ApprovalPanel, Timeline, Comments } from '../components/DocPanels'
 import { useSession } from '../session'
-import { won, dt, day, DIVISIONS } from '../format'
+import { won, dt, day, DIVISIONS, num } from '../format'
 import { LR_STATUS, LR_TONE } from './logisticsShared'
 
 export function LogisticsDetail() {
@@ -34,7 +34,8 @@ export function LogisticsDetail() {
   return (
     <Page title={`${r.request_no}`} sub={<>{r.store_name} · {r.title || '제목 없음'} · <Badge tone={LR_TONE[r.status]}>{LR_STATUS[r.status]}</Badge>{r.kind === 'RESEND' && <> <Badge tone="accent">재발송(무상)</Badge></>}</>}
       actions={<>
-        {isLogi && !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(r.status) && <button onClick={() => setDueOpen(true)}>처리 기한</button>}
+        {isLogi && !['COMPLETED', 'CLOSED', 'CANCELLED', 'REJECTED'].includes(r.status) && <button onClick={() => setDueOpen(true)}>처리 기한</button>}
+        {isLogi && r.status === 'COMPLETED' && <button className="primary" onClick={() => run('close', {}, '확인 완료했습니다')}>확인 완료</button>}
         {r.status === 'DRAFT' && <button className="primary" onClick={() => run('submit', {}, '상신했습니다')}>상신</button>}
         {['DRAFT', 'REJECTED'].includes(r.status) && <button onClick={() => run('cancel', {}, '취소했습니다')}>요청 취소</button>}
         {isLogi && ['LOGISTICS_APPROVED', 'PURCHASED'].includes(r.status) && !extOpen.length && <button onClick={() => run('prepare', {}, '출고 준비로 바꿨습니다')}>출고 준비</button>}
@@ -200,7 +201,7 @@ function AdjustModal({ line, onClose, onSubmit }: any) {
   return (
     <Modal title={`단가·수량 조정 · ${line.item_name}`} onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ unitPrice: Number(price), qty: Number(qty) }) }}>
-        <label htmlFor="aj-p">단가 (공급가)</label><input id="aj-p" inputMode="numeric" value={price} onChange={e => setPrice(e.target.value.replace(/\D/g, ''))} />
+        <label htmlFor="aj-p">단가 (공급가)</label><input id="aj-p" inputMode="numeric" value={num(price)} onChange={e => setPrice(e.target.value.replace(/\D/g, ''))} />
         <label htmlFor="aj-q">수량</label><input id="aj-q" inputMode="decimal" value={qty} onChange={e => setQty(e.target.value)} />
         <p className="muted small">매장 할인 조건은 그대로 다시 적용됩니다. 조정 내역은 이력에 남습니다.</p>
         <button className="primary">조정</button>

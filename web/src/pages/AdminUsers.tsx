@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
 import { useSession } from '../session'
-import { ROLE_NAMES, SITE_TYPES, HQ_SITE, won, dt } from '../format'
+import { ROLE_NAMES, SITE_TYPES, HQ_SITE, won, dt, num } from '../format'
 
 type Asg = { id: string; role: string; roleName: string; roleActive: boolean; scopeType: string; scopeId: string | null; line: string }
 type U = { id: string; loginId: string; name: string; status: string; vatOverride: string | null; lastLoginAt: string | null; initialPassword: boolean; suspendedAt: string | null; assignments: Asg[] }
@@ -125,7 +125,7 @@ function CreateUser({ isAdmin, stores, regions, defaultSite, onClose, onDone }: 
   const sites = stores.filter((x: any) => (x.site_type ?? 'STORE') === site)
   const noEmployee = role === 'INVESTOR'
   const hourly = emp.employmentType === 'PART_TIME'
-  const group = GRADE_GROUP[role]
+  const group = emp.employmentType === 'FREELANCER' ? 'f' : GRADE_GROUP[role]
   const gradeList = (grades.data ?? []).filter(g => g.grade_group === group)
   const grade = (grades.data ?? []).find(g => g.code === emp.salaryGrade)
   const changeSite = (v: string) => { setSite(v); setRole(v === 'HQ' ? 'LOGISTICS_MGR' : 'STAFF'); setScopeId(''); setRegionMode(false) }
@@ -165,14 +165,14 @@ function CreateUser({ isAdmin, stores, regions, defaultSite, onClose, onDone }: 
               </select></div>
           ) : null}
           {needScope && <div><label htmlFor="nu-scope-id">{site === 'HQ' ? '권역' : SITE_TYPES[site]}</label>
-            <select id="nu-scope-id" value={scopeId} onChange={e => setScopeId(e.target.value)}>
+            <select id="nu-scope-id" required value={scopeId} onChange={e => setScopeId(e.target.value)}>
               <option value="">선택</option>
               {(site === 'HQ' ? regions : sites).map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select></div>}
         </div>
         <div className="row">
-          <div><label htmlFor="nu-login">아이디</label><input id="nu-login" autoComplete="off" value={f.loginId} onChange={e => setF({ ...f, loginId: e.target.value.trim() })} /></div>
-          <div><label htmlFor="nu-name">이름</label><input id="nu-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /></div>
+          <div><label htmlFor="nu-login">아이디</label><input id="nu-login" required autoComplete="off" value={f.loginId} onChange={e => setF({ ...f, loginId: e.target.value.trim() })} /></div>
+          <div><label htmlFor="nu-name">이름</label><input id="nu-name" required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} /></div>
           <div><label htmlFor="nu-email">이메일 (선택)</label><input id="nu-email" type="email" value={f.email} onChange={e => setF({ ...f, email: e.target.value })} /></div>
           <div><label htmlFor="nu-phone">전화 (선택)</label><input id="nu-phone" inputMode="tel" value={f.phone} onChange={e => setF({ ...f, phone: e.target.value })} /></div>
         </div>
@@ -183,22 +183,22 @@ function CreateUser({ isAdmin, stores, regions, defaultSite, onClose, onDone }: 
             <span>같은 정보로 직원 등록 (사번 자동 · 소속 {site === 'HQ' ? '본사' : (sites.find((x: any) => x.id === scopeId)?.name ?? SITE_TYPES[site])})</span></label>
           {emp.register && <div className="row">
             <div><label htmlFor="ne-type">고용형태</label>
-              <select id="ne-type" value={emp.employmentType} onChange={e => setEmp({ ...emp, employmentType: e.target.value })}>
-                <option value="REGULAR">정규직</option><option value="CONTRACT">계약직</option>{role === 'STAFF' && <option value="PART_TIME">아르바이트(시급)</option>}
+              <select id="ne-type" value={emp.employmentType} onChange={e => setEmp({ ...emp, employmentType: e.target.value, salaryGrade: '' })}>
+                <option value="REGULAR">정규직</option><option value="CONTRACT">계약직</option>{role === 'STAFF' && <option value="PART_TIME">아르바이트(시급)</option>}<option value="FREELANCER">프리랜서(3.3%)</option>
               </select></div>
-            {hourly ? <div><label htmlFor="ne-wage">시급 (원)</label><input id="ne-wage" inputMode="numeric" value={emp.baseWage} onChange={e => setEmp({ ...emp, baseWage: e.target.value.replace(/\D/g, '') })} /></div>
+            {hourly ? <div><label htmlFor="ne-wage">시급 (원)</label><input id="ne-wage" required inputMode="numeric" value={num(emp.baseWage)} onChange={e => setEmp({ ...emp, baseWage: e.target.value.replace(/\D/g, '') })} /></div>
               : <div><label htmlFor="ne-grade">연봉 등급</label>
-                <select id="ne-grade" value={emp.salaryGrade} onChange={e => setEmp({ ...emp, salaryGrade: e.target.value })}>
+                <select id="ne-grade" required value={emp.salaryGrade} onChange={e => setEmp({ ...emp, salaryGrade: e.target.value })}>
                   <option value="">선택</option>
-                  {gradeList.map(g => <option key={g.code} value={g.code}>{g.code} · 연 {won(g.annual_salary)}</option>)}
+                  {gradeList.map(g => <option key={g.code} value={g.code}>{g.code} · {group === 'f' ? `월 ${won(g.monthly)}` : `연 ${won(g.annual_salary)}`}</option>)}
                 </select></div>}
-            <div><label htmlFor="ne-wh">주 소정근로 (시간)</label><input id="ne-wh" inputMode="decimal" value={emp.weeklyHours} onChange={e => setEmp({ ...emp, weeklyHours: e.target.value })} /></div>
-            <div><label htmlFor="ne-hire">입사일</label><input id="ne-hire" type="date" value={emp.hireDate} onChange={e => setEmp({ ...emp, hireDate: e.target.value })} /></div>
+            <div><label htmlFor="ne-wh">주 소정근로 (시간)</label><input id="ne-wh" required inputMode="decimal" value={emp.weeklyHours} onChange={e => setEmp({ ...emp, weeklyHours: e.target.value })} /></div>
+            <div><label htmlFor="ne-hire">입사일</label><input id="ne-hire" required type="date" value={emp.hireDate} onChange={e => setEmp({ ...emp, hireDate: e.target.value })} /></div>
           </div>}
-          {emp.register && grade && <div className="note">연봉 <b>{won(grade.annual_salary)}원</b> · 월 급여 <b>{won(grade.monthly)}원</b> ({grade.group_name} {grade.step}단계)</div>}
+          {emp.register && grade && <div className="note">{group === 'f' ? <>월 <b>{won(grade.monthly)}원</b> · 3.3% 원천징수 후 약 <b>{won(Math.floor(grade.monthly * 0.967))}원</b></> : <>연봉 <b>{won(grade.annual_salary)}원</b> · 월 급여 <b>{won(grade.monthly)}원</b></>} ({grade.group_name} {grade.step}단계)</div>}
         </>}
         {err && <div className="error-box">{err}</div>}
-        <button className="primary" disabled={busy || !f.loginId || !f.name || (needScope && !scopeId) || !empOk}>{busy ? '만드는 중…' : '만들기'}</button>
+        <button className="primary" disabled={busy}>{busy ? '만드는 중…' : '만들기'}</button>
       </form>
     </Modal>
   )
@@ -230,7 +230,7 @@ function GrantRole({ user, stores, regions, onClose, onDone }: any) {
         </select>
         {scopeType !== 'ALL' && (<>
           <label htmlFor="scope-id">{scopeType === 'REGION' ? '권역' : '매장·베이커리'}</label>
-          <select id="scope-id" value={scopeId} onChange={e => setScopeId(e.target.value)}>
+          <select id="scope-id" required value={scopeId} onChange={e => setScopeId(e.target.value)}>
             <option value="">선택</option>
             {scopeType === 'REGION' ? regions.map((x: any) => <option key={x.id} value={x.id}>{x.name}</option>)
               : ['STORE', 'BAKERY'].map(t => <optgroup key={t} label={SITE_TYPES[t]}>
@@ -239,7 +239,7 @@ function GrantRole({ user, stores, regions, onClose, onDone }: any) {
           </select>
         </>)}
         {err && <div className="error-box">{err}</div>}
-        <button className="primary" disabled={scopeType !== 'ALL' && !scopeId}>배정</button>
+        <button className="primary">배정</button>
       </form>
     </Modal>
   )

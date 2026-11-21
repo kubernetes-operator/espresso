@@ -11,7 +11,8 @@ export type Store = {
 
 type Session = {
   user: User | null
-  roles: Set<string>
+  roles: Set<string>                  // 권한 판단용 (총괄·슈퍼바이저 → 물류·인사 관리자 권한 포함)
+  baseRoles: Set<string>              // 실제 배정 등급 (표시용)
   has: (...roles: string[]) => boolean
   stores: Store[]
   storeId: string | 'ALL'            // 선택 매장 (2개 이상이면 '전체' 가능)
@@ -82,11 +83,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }
 
   const value = useMemo<Session>(() => {
-    const roles = new Set((user?.assignments ?? []).map(a => a.r))
+    const baseRoles = new Set((user?.assignments ?? []).map(a => a.r))
+    const roles = new Set(baseRoles)
+    if (roles.has('HQ_ADMIN') || roles.has('SUPERVISOR')) { roles.add('LOGISTICS_MGR'); roles.add('HR_MGR') }
     const currentStore = storeId === 'ALL' ? null : stores.find(s => s.id === storeId) ?? null
     const vatMode: VatMode = (user?.vatOverride as VatMode) || currentStore?.vat_display_mode || 'EXCLUSIVE'
     return {
-      user, roles, has: (...r: string[]) => r.some(x => roles.has(x)), stores, storeId, setStoreId,
+      user, roles, baseRoles, has: (...r: string[]) => r.some(x => roles.has(x)), stores, storeId, setStoreId,
       currentStore, vatMode, login, logout, reloadStores, ready,
       passwordChanged: () => setUser(u => u ? { ...u, initialPassword: false } : u),
     }

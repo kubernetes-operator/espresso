@@ -32,6 +32,10 @@ public class AuthClient {
         }
     }
 
+    public void rename(UUID user, String name) {
+        http.put().uri("/internal/users/{id}/name", user).body(Map.of("name", name)).retrieve().toBodilessEntity();
+    }
+
     public List<UUID> approvers(String role, UUID storeId, UUID regionId) {
         List<UUID> r = http.get().uri(u -> u.path("/internal/users/approvers").queryParam("role", role)
                         .queryParamIfPresent("storeId", Optional.ofNullable(storeId))
