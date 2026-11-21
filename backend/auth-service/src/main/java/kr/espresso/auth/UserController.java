@@ -279,6 +279,19 @@ public class UserController {
         return Map.of("id", aid);
     }
 
+    /** 직원 이름 변경을 계정 이름에도 반영 (core 인사 → auth) */
+    @PutMapping("/internal/users/{id}/name")
+    public Map<String, Object> rename(@PathVariable UUID id, @RequestBody Map<String, String> b) {
+        String name = b.get("name");
+        if (name == null || name.isBlank()) throw ApiException.bad("이름을 입력하세요.");
+        var before = db.sql("select name from auth.app_user where id = ?").param(id).query(String.class).optional();
+        if (before.isEmpty()) throw ApiException.notFound("사용자");
+        if (before.get().equals(name.trim())) return Map.of("changed", false);
+        db.sql("update auth.app_user set name = ?, updated_at = now() where id = ?").params(name.trim(), id).update();
+        audit(null, "USER_RENAME_FROM_HR", id, Map.of("name", before.get()), Map.of("name", name.trim()));
+        return Map.of("changed", true);
+    }
+
     /** 각 서비스의 토큰 검증에서 계정 상태 확인 (정지 계정 차단) */
     @GetMapping("/internal/users/{id}/status")
     public Map<String, Object> status(@PathVariable UUID id) {

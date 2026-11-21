@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Empty } from '../components/ui'
 import { useSession } from '../session'
-import { won, dt } from '../format'
+import { won, dt, num } from '../format'
 
 const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)
 const FIELDS: [string, string][] = [['beverage', '음료'], ['dessert', '디저트'], ['tableware', '식기·포장'], ['etc', '기타'], ['discount', '할인'], ['refund', '환불']]
@@ -36,7 +36,7 @@ export function Closing() {
     try { await api('/api/core/sales/shift-closes/apply', { body: { storeId, date, close } }); setMsg(close ? '일 매출로 반영하고 마감했습니다' : '일 매출로 반영했습니다'); d.reload() } catch (e: any) { setErr(e.message) }
   }
   const t = d.data?.subtotal
-  const field = (k: string, l: string) => <div key={k}><label htmlFor={`sc-${k}`}>{l}</label><input id={`sc-${k}`} inputMode="numeric" value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>
+  const field = (k: string, l: string) => <div key={k}><label htmlFor={`sc-${k}`}>{l}</label><input id={`sc-${k}`} inputMode="numeric" value={num(f[k])} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>
   return (
     <Page title="근무 마감" sub={`${s.currentStore?.name} · 금액은 POS와 같은 결제 금액(VAT 포함)`}
       actions={<input id="sc-date" type="date" aria-label="날짜" value={date} max={today()} onChange={e => setDate(e.target.value)} />}>

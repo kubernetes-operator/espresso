@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal, Empty } from '../components/ui'
 import { useSession } from '../session'
-import { won, dt, day } from '../format'
+import { won, dt, day, num } from '../format'
 import { useNames } from '../components/directory'
 
 const ST: Record<string, string> = { DRAFT: '작성', ISSUED: '발행', PARTIALLY_PAID: '부분 입금', PAID: '완납', OVERDUE: '연체', CANCELLED: '취소' }
@@ -86,7 +86,7 @@ function PayModal({ balance, onClose, onSubmit }: any) {
   return (
     <Modal title="입금 등록" onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ amount: Number(amount), paidDate: date, depositor, method: 'TRANSFER' }) }}>
-        <label htmlFor="pay-amt">입금액 (잔액 {won(balance)}원)</label><input id="pay-amt" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/\D/g, ''))} />
+        <label htmlFor="pay-amt">입금액 (잔액 {won(balance)}원)</label><input id="pay-amt" inputMode="numeric" value={num(amount)} onChange={e => setAmount(e.target.value.replace(/\D/g, ''))} />
         <label htmlFor="pay-date">입금일</label><input id="pay-date" type="date" value={date} onChange={e => setDate(e.target.value)} />
         <label htmlFor="pay-dep">입금자명</label><input id="pay-dep" value={depositor} onChange={e => setDepositor(e.target.value)} />
         <button className="primary">등록</button>

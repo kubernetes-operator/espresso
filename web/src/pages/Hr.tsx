@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast, Empty } from '../components/ui'
 import { useSession } from '../session'
-import { won, dt } from '../format'
+import { won, dt, num } from '../format'
 
 export const EMP_TYPE: Record<string, string> = { REGULAR: '정규직', CONTRACT: '계약직', PART_TIME: '아르바이트', FREELANCER: '프리랜서(3.3%)' }
 const thisMonth = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7)
@@ -123,14 +123,14 @@ function EmpModal({ emp, storeId, onClose, onDone }: any) {
               <option value="">선택</option>
               {groups.map(([g, n]) => <optgroup key={g} label={`${n} (${g}1~)`}>{(grades.data ?? []).filter(x => x.grade_group === g).map(x => <option key={x.code} value={x.code}>{x.code} · {g === 'f' ? `월 ${won(x.monthly)}` : `연 ${won(x.annual_salary)}`}</option>)}</optgroup>)}
             </select></div>
-            : <div><label htmlFor="em-wage">{f.payType === 'HOURLY' ? '시급' : '월급'} (원)</label><input id="em-wage" required inputMode="numeric" value={f.baseWage} onChange={e => set('baseWage', e.target.value.replace(/\D/g, ''))} /></div>}
+            : <div><label htmlFor="em-wage">{f.payType === 'HOURLY' ? '시급' : '월급'} (원)</label><input id="em-wage" required inputMode="numeric" value={num(f.baseWage)} onChange={e => set('baseWage', e.target.value.replace(/\D/g, ''))} /></div>}
           <div><label htmlFor="em-wh">주 소정근로 (시간)</label><input id="em-wh" required inputMode="decimal" value={f.weeklyHours} onChange={e => set('weeklyHours', e.target.value)} /></div>
         </div>
         {f.payType === 'GRADE' && grade && <div className="note">연봉 <b>{won(grade.annual_salary)}원</b> · 월 급여 <b>{won(grade.monthly)}원</b> ({grade.group_name} {grade.step}단계)</div>}
         {f.employmentType !== 'FREELANCER' && <div className="chips">{chk('weeklyHolidayPay', '주휴수당')}{chk('nationalPension', '국민연금')}{chk('healthInsurance', '건강보험')}{chk('employmentInsurance', '고용보험')}</div>}
         <div className="row">
           <div><label htmlFor="em-dep">부양가족 수 (소득세)</label><input id="em-dep" inputMode="numeric" value={f.taxDependents} onChange={e => set('taxDependents', e.target.value)} /></div>
-          <div><label htmlFor="em-meal">식대 비과세 (원/월)</label><input id="em-meal" inputMode="numeric" value={f.mealAllowance} onChange={e => set('mealAllowance', e.target.value.replace(/\D/g, ''))} /></div>
+          <div><label htmlFor="em-meal">식대 비과세 (원/월)</label><input id="em-meal" inputMode="numeric" value={num(f.mealAllowance)} onChange={e => set('mealAllowance', e.target.value.replace(/\D/g, ''))} /></div>
           {!isNew && <div><label htmlFor="em-st">상태</label><select id="em-st" value={f.status} onChange={e => set('status', e.target.value)}><option value="ACTIVE">재직</option><option value="LEAVE">휴직</option><option value="RESIGNED">퇴사</option></select></div>}
           {!isNew && f.status === 'RESIGNED' && <div><label htmlFor="em-resign">퇴사일</label><input id="em-resign" type="date" value={f.resignDate} onChange={e => set('resignDate', e.target.value)} /></div>}
         </div>
@@ -138,7 +138,7 @@ function EmpModal({ emp, storeId, onClose, onDone }: any) {
         {etc.map((x, i) => (
           <div key={i} className="allow-row">
             <input aria-label="항목 이름" placeholder="예: 자가운전보조금" value={x.name} onChange={e => setEtc(etc.map((y, j) => j === i ? { ...y, name: e.target.value } : y))} />
-            <input aria-label="월 금액" inputMode="numeric" placeholder="원/월" value={x.amount} onChange={e => setEtc(etc.map((y, j) => j === i ? { ...y, amount: e.target.value.replace(/\D/g, '') } : y))} />
+            <input aria-label="월 금액" inputMode="numeric" placeholder="원/월" value={num(x.amount)} onChange={e => setEtc(etc.map((y, j) => j === i ? { ...y, amount: e.target.value.replace(/\D/g, '') } : y))} />
             <button type="button" className="ghost small" aria-label="항목 삭제" onClick={() => setEtc(etc.filter((_, j) => j !== i))}>✕</button>
           </div>))}
         <button type="button" className="ghost small" onClick={() => setEtc([...etc, { name: '', amount: '' }])}>+ 기타 항목</button>

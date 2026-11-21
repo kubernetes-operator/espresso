@@ -26,8 +26,35 @@ public class WeekCloseService {
     private final JdbcClient db;
     private final CoreClient core;
     private final ObjectMapper om;
+    private final SettlementService stl;
 
-    public WeekCloseService(JdbcClient db, CoreClient core, ObjectMapper om) { this.db = db; this.core = core; this.om = om; }
+    public WeekCloseService(JdbcClient db, CoreClient core, ObjectMapper om, SettlementService stl) { this.db = db; this.core = core; this.om = om; this.stl = stl; }
+
+    /**
+     * 고정비 일할 배분 (3차 점검 반영): 임대 계약의 월세+관리비(공급가)와 월 감가상각을 날짜별로 (월 금액 ÷ 그 달 일수) 나눠 그 주 일수만큼.
+     * 월말에 한 번 잡히는 임대·감가상각 분개 대신 이 값을 주간 결산에 넣는다.
+     */
+    long[] fixedCosts(UUID store, LocalDate monday) {
+        long rent = 0, dep = 0;
+        List<Map<String, Object>> leases;
+        try { leases = core.leases(store); } catch (Exception e) { leases = List.of(); }
+        Map<String, Long> depByMonth = new HashMap<>();
+        double rentD = 0, depD = 0;
+        for (LocalDate d = monday; !d.isAfter(monday.plusDays(6)); d = d.plusDays(1)) {
+            int days = d.lengthOfMonth();
+            for (var l : leases) {
+                LocalDate a = LocalDate.parse(l.get("start_date").toString());
+                LocalDate b = l.get("end_date") == null ? LocalDate.MAX : LocalDate.parse(l.get("end_date").toString());
+                if (d.isBefore(a) || d.isAfter(b)) continue;
+                rentD += (((Number) l.get("monthly_rent")).longValue() + ((Number) l.get("maintenance_fee")).longValue()) / (double) days;
+            }
+            String p = String.format("%d%02d", d.getYear(), d.getMonthValue());
+            long monthDep = depByMonth.computeIfAbsent(p, k -> stl.depreciationFor(store, k).values().stream().mapToLong(Long::longValue).sum());
+            depD += monthDep / (double) days;
+        }
+        rent = Math.round(rentD); dep = Math.round(depD);
+        return new long[]{rent, dep};
+    }
 
     /** 주간 실적 (분개 일자 기준) */
     public Map<String, Object> compute(UUID store, LocalDate monday) {
@@ -39,6 +66,8 @@ public class WeekCloseService {
                 from stl.journal_line l join stl.account_subject a on a.code = l.account_code
                 where l.store_id = ? and l.entry_date between ? and ? and a.pnl_section is not null group by 1""").params(store, monday, sunday).query().listOfRows())
             s.put((String) r.get("sec"), ((Number) r.get("amt")).longValue());
+        long[] fixed = fixedCosts(store, monday);
+        s.put("RENT", fixed[0]); s.put("DEPRECIATION", fixed[1]);   // 고정비는 일할 배분 값으로
         long sales = s.get("SALES"), gross = sales - s.get("COGS");
         long sga = s.get("LABOR") + s.get("RENT") + s.get("UTILITY") + s.get("INTERNAL_USE") + s.get("OPERATING") + s.get("STOCK_LOSS") + s.get("DEPRECIATION");
         Map<String, Object> m = new LinkedHashMap<>();
@@ -47,6 +76,7 @@ public class WeekCloseService {
         m.put("labor", s.get("LABOR")); m.put("rent", s.get("RENT")); m.put("utility", s.get("UTILITY")); m.put("internal_use", s.get("INTERNAL_USE"));
         m.put("operating_exp", s.get("OPERATING")); m.put("stock_loss", s.get("STOCK_LOSS")); m.put("depreciation", s.get("DEPRECIATION"));
         m.put("operating_profit", gross - sga);
+        m.put("fixed_prorated", true);
         return m;
     }
 

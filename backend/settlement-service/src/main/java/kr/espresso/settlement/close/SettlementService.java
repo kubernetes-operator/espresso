@@ -206,22 +206,29 @@ public class SettlementService {
             ledger.post(store, end, "DEPRECIATION", e.getKey(), "감가상각 " + period, List.of(Line.dr("818", e.getValue(), div, "감가상각"), Line.cr("207", e.getValue(), div, "감가상각누계")), actor);
         }
         var m = compute(store, period, false);
-        int ver = (int) sum("select coalesce(max(version),0) + 1 from stl.settlement_summary where store_id = ? and period = ?", store, period);
-        try {
-            db.sql("""
-                    insert into stl.settlement_summary(store_id, period, version, net_sales, sales_vat, cogs, opening_stock, purchases, closing_stock, gross_profit,
-                      labor, rent, utility, internal_use, operating_exp, stock_loss, depreciation, operating_profit, royalty, non_operating, settlement_amount, by_division, direct_purchase)
-                    values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, cast(? as jsonb), ?)""")
-                    .params(store, period, ver, m.get("net_sales"), m.get("sales_vat"), m.get("cogs"), m.get("opening_stock"), m.get("purchases"), m.get("closing_stock"),
-                            m.get("gross_profit"), m.get("labor"), m.get("rent"), m.get("utility"), m.get("internal_use"), m.get("operating_exp"), m.get("stock_loss"),
-                            m.get("depreciation"), m.get("operating_profit"), m.get("royalty"), m.get("non_operating"), m.get("settlement_amount"),
-                            om.writeValueAsString(m.get("by_division")), m.get("direct_purchase")).update();
-        } catch (Exception e) { throw new IllegalStateException(e); }
+        saveSummary(store, period, m, null, null);
         db.sql("""
                 insert into stl.period_close(store_id, period, status, closed_by, closed_at) values (?,?, 'CLOSED', ?, now())
                 on conflict (store_id, period) do update set status = 'CLOSED', closed_by = excluded.closed_by, closed_at = now()""").params(store, period, actor).update();
         audit(actor, "PERIOD_CLOSE", store, period);
         return m;
+    }
+
+    /** 결산 요약 저장 (새 버전). 수정 결산이면 고친 사람·사유를 남김 */
+    int saveSummary(UUID store, String period, Map<String, Object> m, UUID revisedBy, String memo) {
+        int ver = (int) sum("select coalesce(max(version),0) + 1 from stl.settlement_summary where store_id = ? and period = ?", store, period);
+        try {
+            db.sql("""
+                    insert into stl.settlement_summary(store_id, period, version, net_sales, sales_vat, cogs, opening_stock, purchases, closing_stock, gross_profit,
+                      labor, rent, utility, internal_use, operating_exp, stock_loss, depreciation, operating_profit, royalty, non_operating, settlement_amount, by_division, direct_purchase,
+                      revised_by, revise_memo)
+                    values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, cast(? as jsonb), ?, ?, ?)""")
+                    .params(store, period, ver, m.get("net_sales"), m.get("sales_vat"), m.get("cogs"), m.get("opening_stock"), m.get("purchases"), m.get("closing_stock"),
+                            m.get("gross_profit"), m.get("labor"), m.get("rent"), m.get("utility"), m.get("internal_use"), m.get("operating_exp"), m.get("stock_loss"),
+                            m.get("depreciation"), m.get("operating_profit"), m.get("royalty"), m.get("non_operating"), m.get("settlement_amount"),
+                            om.writeValueAsString(m.get("by_division")), m.get("direct_purchase"), revisedBy, memo).update();
+        } catch (Exception e) { throw new IllegalStateException(e); }
+        return ver;
     }
 
     @Transactional
@@ -234,6 +241,11 @@ public class SettlementService {
         UUID src = UUID.nameUUIDFromBytes((store + ":" + period + ":ROYALTY").getBytes());
         ledger.reverse("ROYALTY", src, period, "마감 취소 로열티 역분개 " + period, actor);
         db.sql("delete from stl.hq_charge where ref_id = ? and statement_id is null").param(src).update();
+        // 수정 결산 로열티 차액도 되돌림 (다시 마감하면 로열티를 처음부터 계산)
+        for (UUID adj : db.sql("select distinct source_id from stl.journal_entry where store_id = ? and period = ? and source_type = 'ROYALTY_ADJ'").params(store, period).query(UUID.class).list()) {
+            ledger.reverse("ROYALTY_ADJ", adj, period, "마감 취소 로열티 차액 역분개 " + period, actor);
+            db.sql("delete from stl.hq_charge where ref_id = ? and statement_id is null").param(adj).update();
+        }
         for (UUID asset : db.sql("select distinct source_id from stl.journal_entry where store_id = ? and period = ? and source_type = 'DEPRECIATION'").params(store, period).query(UUID.class).list())
             ledger.reverse("DEPRECIATION", asset, period, "마감 취소 감가상각 역분개 " + period, actor);
         audit(actor, "PERIOD_REOPEN", store, period);

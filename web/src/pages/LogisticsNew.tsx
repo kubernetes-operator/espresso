@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox } from '../components/ui'
 import { useSession } from '../session'
-import { won, DIVISIONS } from '../format'
+import { won, DIVISIONS, num } from '../format'
 import { checkRequired } from '../components/enhance'
 
 type Item = { id: string; sku: string; name: string; unit: string; tax_type: string; list_price: number; base_price: number; discount_type: string | null; discount_value: number | null; division_code: string; category_name: string; is_asset: boolean }
@@ -154,7 +154,7 @@ export function LogisticsNew() {
                   {(cats.data ?? []).filter(c => c.division_name === d).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
               </select>
               <div className="row two">
-                <div><label htmlFor="ex-price">단가 (원)</label><input id="ex-price" required inputMode="numeric" value={ext.unitPrice} onChange={e => setExt({ ...ext, unitPrice: e.target.value.replace(/\D/g, '') })} /></div>
+                <div><label htmlFor="ex-price">단가 (원)</label><input id="ex-price" required inputMode="numeric" value={num(ext.unitPrice)} onChange={e => setExt({ ...ext, unitPrice: e.target.value.replace(/\D/g, '') })} /></div>
                 <div><label htmlFor="ex-mode">단가 기준</label>
                   <select id="ex-mode" value={ext.priceInputMode} onChange={e => setExt({ ...ext, priceInputMode: e.target.value })}>
                     <option value="INCLUSIVE">VAT 포함 금액</option><option value="EXCLUSIVE">VAT 별도 금액</option></select></div>
@@ -166,7 +166,7 @@ export function LogisticsNew() {
                 <div><label htmlFor="ex-qty">수량</label><input id="ex-qty" required inputMode="decimal" value={ext.qty} onChange={e => setExt({ ...ext, qty: e.target.value })} /></div>
               </div>
               <div className="row two">
-                <div><label htmlFor="ex-ship">배송비 (원)</label><input id="ex-ship" inputMode="numeric" value={ext.shippingFee} onChange={e => setExt({ ...ext, shippingFee: e.target.value.replace(/\D/g, '') })} /></div>
+                <div><label htmlFor="ex-ship">배송비 (원)</label><input id="ex-ship" inputMode="numeric" value={num(ext.shippingFee)} onChange={e => setExt({ ...ext, shippingFee: e.target.value.replace(/\D/g, '') })} /></div>
                 <div><label htmlFor="ex-payer">결제 주체</label>
                   <select id="ex-payer" value={ext.payer} onChange={e => setExt({ ...ext, payer: e.target.value })}>
                     <option value="STORE">매장 결제</option><option value="HQ">본사 결제 (정산서 청구)</option></select></div>
