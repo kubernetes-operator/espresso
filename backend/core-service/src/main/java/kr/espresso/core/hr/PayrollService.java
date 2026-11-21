@@ -12,7 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.YearMonth;
 import java.util.*;
 
-/** 급여 실행: 계산 → 상신(인적관리자 → 점주 → 총괄) → 확정 시 결산 이벤트 → 명세서 발행 */
+/** 급여 실행: 계산 → 상신(인사관리자 → 점주 → 총괄) → 확정 시 결산 이벤트 → 명세서 발행 */
 @Service
 public class PayrollService implements ApprovalHandler {
     public static final String DOC = "PAYROLL_RUN";
@@ -58,8 +58,11 @@ public class PayrollService implements ApprovalHandler {
             UUID emp = (UUID) e.get("employee_id");
             var work = db.sql("select * from hr.work_record where employee_id = ? and work_date between ? and ? and clock_out is not null")
                     .params(emp, ym.atDay(1), ym.atEndOfMonth()).query().listOfRows();
-            if (work.isEmpty() && !"MONTHLY".equals(e.get("pay_type"))) continue;
-            var r = calc.calc(e, work, ym, fivePlus);
+            Map<String, Long> extras = new HashMap<>();
+            for (var x : db.sql("select code, amount from hr.payroll_extra where store_id = ? and period = ? and employee_id = ?").params(store, period, emp).query().listOfRows())
+                extras.put((String) x.get("code"), ((Number) x.get("amount")).longValue());
+            if (work.isEmpty() && !"MONTHLY".equals(e.get("pay_type")) && e.get("salary_grade") == null && extras.isEmpty()) continue;
+            var r = calc.calc(e, work, ym, fivePlus, extras);
             UUID pid = UUID.randomUUID();
             db.sql("insert into hr.payslip(id, payroll_run_id, employee_id, contract_id, gross_pay, taxable_pay, total_deduction, net_pay, employer_contrib, severance_accrual, worked_minutes) values (?,?,?,?,?,?,?,?,?,?,?)")
                     .params(pid, id, emp, e.get("contract_id"), r.gross(), r.taxable(), r.deduction(), r.net(), r.employer(), r.severance(), r.workedMinutes()).update();
@@ -119,12 +122,15 @@ public class PayrollService implements ApprovalHandler {
                 select case when c.employment_type in ('PART_TIME','FREELANCER') then 'PT' else 'REG' end cat, i.code, sum(i.amount) amt
                 from hr.payslip p join hr.employment_contract c on c.id = p.contract_id join hr.payslip_item i on i.payslip_id = p.id
                 where p.payroll_run_id = ? and i.kind = 'EARNING' group by 1, 2""").param(docId).query().listOfRows()) {
-            String key = "BASE".equals(x.get("code")) || "MEAL".equals(x.get("code")) || "WEEKLY_HOLIDAY".equals(x.get("code")) ? x.get("cat").toString() : "ALLOW";
+            String code = (String) x.get("code");
+            String key = "BONUS".equals(code) ? "BONUS" : "SEVERANCE".equals(code) ? "SEV"
+                    : "BASE".equals(code) || "MEAL".equals(code) || "WEEKLY_HOLIDAY".equals(code) ? x.get("cat").toString() : "ALLOW";
             by.merge(key, ((Number) x.get("amt")).longValue(), Long::sum);
         }
         Map<String, Object> p = new LinkedHashMap<>();
         p.put("payrollRunId", docId); p.put("storeId", r.get("store_id")); p.put("period", r.get("period"));
         p.put("regularPay", by.getOrDefault("REG", 0L)); p.put("partTimePay", by.getOrDefault("PT", 0L)); p.put("allowances", by.getOrDefault("ALLOW", 0L));
+        p.put("bonus", by.getOrDefault("BONUS", 0L)); p.put("severancePaid", by.getOrDefault("SEV", 0L));
         p.put("employerContrib", r.get("total_employer_contrib")); p.put("severanceAccrual", r.get("total_severance_accrual"));
         p.put("deductions", r.get("total_deduction")); p.put("netPay", r.get("total_net"));
         outbox.publish("hr", DOC, docId, "PayrollConfirmed", p);

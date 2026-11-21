@@ -4,7 +4,7 @@ import { useSession } from '../session'
 
 type Asg = { id: string; role: string; roleName: string; line: string; rank: number; roleActive: boolean; scopeType: string; scopeId: string | null }
 type U = { id: string; loginId: string; name: string; status: string; assignments: Asg[] }
-type StoreName = { id: string; code: string; name: string; region_id: string; region_name: string; status: string }
+type StoreName = { id: string; code: string; name: string; region_id: string; region_name: string; status: string; site_type?: string }
 
 function Person({ u, me, note }: { u: U; me: string | undefined; note?: string }) {
   return (
@@ -35,7 +35,10 @@ export function Org() {
       return [...new Set(names)].join(', ') + ' 담당'
     }
     const regions = new Map<string, { name: string; stores: StoreName[] }>()
-    for (const st of stores.data ?? []) {
+    const hqView = s.has('HQ_ADMIN', 'LOGISTICS_MGR', 'HR_MGR')
+    // 본사 등급이 아니면 사람이 보이는 매장만 (자기 매장·투자 매장·다른 매장의 매장 관리자)
+    const visible = (stores.data ?? []).filter(st => st.site_type !== 'HQ' && (hqView || users.some(u => u.assignments.some(a => a.scopeId === st.id))))
+    for (const st of visible) {
       const r = regions.get(st.region_id) ?? { name: st.region_name ?? '미지정', stores: [] }
       r.stores.push(st); regions.set(st.region_id, r)
     }
@@ -54,15 +57,16 @@ export function Org() {
       <ErrorBox error={org.error || stores.error} />
       {view === 'roles' ? (
         <div className="org-roles card">
-          <div className="org-node top"><b>총괄 관리자</b><small>최상위 · 전 매장</small></div>
+          <div className="org-node top"><b>총괄 관리자</b><small>최상위 · 전 매장 · 물류·인사 권한 포함</small></div>
           <div className="org-arrow">▼</div>
           <div className="org-lines">
             <div className="org-branch hq">
               <div className="branch-label">본사 라인</div>
+              <div className="org-node hq"><b>슈퍼바이저</b><small>권역 담당 · 물류·인사 권한 포함</small></div>
+              <div className="org-arrow">▼</div>
               <div className="org-row">
                 <div className="org-node hq"><b>물류 관리자</b><small>물류 승인·발송·단가</small></div>
-                <div className="org-node hq"><b>인적 관리자</b><small>직원·근무·급여</small></div>
-                <div className="org-node hq off"><b>슈퍼바이저</b><small>권역 담당 · 비활성</small></div>
+                <div className="org-node hq"><b>인사 관리자</b><small>직원·근무·급여</small></div>
               </div>
             </div>
             <div className="org-branch store">
@@ -85,9 +89,9 @@ export function Org() {
                 {data.byRole('HQ_ADMIN').map(u => <Person key={u.id} u={u} me={me} />)}</div>
               <div className="org-col"><div className="col-label">물류 관리자</div>
                 {data.byRole('LOGISTICS_MGR').map(u => <Person key={u.id} u={u} me={me} note={data.scopeNote(u, 'LOGISTICS_MGR')} />)}</div>
-              <div className="org-col"><div className="col-label">인적 관리자</div>
+              <div className="org-col"><div className="col-label">인사 관리자</div>
                 {data.byRole('HR_MGR').map(u => <Person key={u.id} u={u} me={me} note={data.scopeNote(u, 'HR_MGR')} />)}</div>
-              <div className="org-col"><div className="col-label">슈퍼바이저 <Badge>비활성</Badge></div>
+              <div className="org-col"><div className="col-label">슈퍼바이저</div>
                 {data.byRole('SUPERVISOR').map(u => <Person key={u.id} u={u} me={me} note={data.scopeNote(u, 'SUPERVISOR')} />)}</div>
             </div>
           </section>
@@ -98,8 +102,9 @@ export function Org() {
                 {r.stores.map(st => (
                   <div key={st.id} className="org-store">
                     <div className="store-title"><b>{st.name}</b> <code>{st.code}</code></div>
-                    {!['OWNER', 'STORE_MGR', 'STAFF', 'INVESTOR'].some(r => atStore(r, st.id).length) && <div className="muted small">이 매장 인원은 해당 매장 계정과 본사만 볼 수 있습니다.</div>}
-                    {[['OWNER', '점주'], ['STORE_MGR', '매장 관리자'], ['STAFF', '일반 사원'], ['INVESTOR', '투자자']].map(([role, label]) => {
+                    {st.site_type === 'BAKERY' && <span className="badge info">베이커리</span>}
+                    {!['OWNER', 'STORE_MGR', 'STAFF', 'INVESTOR'].some(r => atStore(r, st.id).length) && <div className="muted small">배정된 인원이 없습니다.</div>}
+                    {[['OWNER', '점주'], ['STORE_MGR', st.site_type === 'BAKERY' ? '베이커리 관리자' : '매장 관리자'], ['STAFF', '일반 사원'], ['INVESTOR', '투자자']].map(([role, label]) => {
                       const people = atStore(role, st.id)
                       if (!people.length) return null
                       return (
@@ -115,7 +120,7 @@ export function Org() {
               </div>
             </section>
           ))}
-          <p className="muted small">매장 라인 계정은 본사 인원과 자기 매장 인원만 보입니다. 투자자는 자기 정보만 보입니다.</p>
+          <p className="muted small">점주·매장 관리자·사원은 본사 인원, 자기 매장 인원, 다른 매장의 매장 관리자만 봅니다. 투자자는 본사 인원과 투자한 매장 인원만 봅니다.</p>
         </div>
       )}
     </Page>

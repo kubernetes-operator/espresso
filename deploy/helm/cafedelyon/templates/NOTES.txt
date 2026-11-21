@@ -1,0 +1,3 @@
+cafedelyon 배포: https://{{ .Values.host }}  (이미지 태그 {{ .Values.image.tag }})
+- 상태: kubectl get pods -n {{ .Release.Namespace }}
+- 데모 계정 {{ if .Values.demo.seed }}켜짐 (운영 전환 시 demo.seed=false){{ else }}꺼짐{{ end }}

@@ -29,7 +29,22 @@ public record CurrentUser(UUID id, String loginId, String name, List<RoleScope> 
             }
         }
         return new CurrentUser(UUID.fromString(jwt.getSubject()), jwt.getClaimAsString("login"),
-                jwt.getClaimAsString("name"), List.copyOf(list), jwt.getClaimAsString("vat"));
+                jwt.getClaimAsString("name"), expand(list), jwt.getClaimAsString("vat"));
+    }
+
+    /**
+     * 총괄 관리자·슈퍼바이저는 같은 범위에서 물류 관리자·인사 관리자 권한을 함께 가진다 (2차 점검 반영).
+     * 실제 배정은 그대로 두고 권한 판단용 배정만 덧붙인다.
+     */
+    static List<RoleScope> expand(List<RoleScope> list) {
+        List<RoleScope> out = new ArrayList<>(list);
+        for (RoleScope a : list)
+            if (Roles.HQ_ADMIN.equals(a.role()) || Roles.SUPERVISOR.equals(a.role()))
+                for (String r : List.of(Roles.LOGISTICS_MGR, Roles.HR_MGR)) {
+                    RoleScope x = new RoleScope(r, a.scopeType(), a.scopeId());
+                    if (!out.contains(x)) out.add(x);
+                }
+        return List.copyOf(out);
     }
 
     public Set<String> roles() {

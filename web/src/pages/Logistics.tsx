@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useApi, Page, Badge, ErrorBox, Empty } from '../components/ui'
 import { useSession } from '../session'
 import { won, dt } from '../format'
-import { LR_STATUS, LR_TONE } from './logisticsShared'
+import { LR_STATUS, LR_TONE, overdue, dueText } from './logisticsShared'
 
 export function Logistics() {
   const s = useSession()
@@ -27,16 +27,17 @@ export function Logistics() {
       <ErrorBox error={list.error} />
       <div className="card table-wrap">
         <table className="tbl">
-          <thead><tr><th>번호</th><th>매장</th><th>제목</th><th>상태</th><th className="num">품목</th><th className="num">금액</th><th>요청</th><th>승인</th><th>완료</th></tr></thead>
+          <thead><tr><th>번호</th><th>매장</th><th>제목</th><th>상태</th><th className="num">품목</th><th className="num">금액</th><th>기한</th><th>요청</th><th>승인</th><th>완료</th></tr></thead>
           <tbody>
             {(list.data ?? []).map(r => (
               <tr key={r.id} className="clickable" onClick={() => nav(`/logistics/${r.id}`)}>
-                <td><code>{r.request_no}</code>{r.is_initial_order && <> <Badge tone="info">초도</Badge></>}</td>
+                <td><code>{r.request_no}</code>{r.is_initial_order && <> <Badge tone="info">초도</Badge></>}{r.kind === 'RESEND' && <> <Badge tone="accent">재발송</Badge></>}</td>
                 <td>{r.store_name}</td>
                 <td>{r.title || '—'}{r.external_count > 0 && <> <Badge tone="accent">외부 {r.external_count}</Badge></>}</td>
                 <td><Badge tone={LR_TONE[r.status]}>{LR_STATUS[r.status]}</Badge></td>
                 <td className="num">{r.line_count}</td>
                 <td className="num">{won(inc ? r.total_amount : r.taxable_supply + r.exempt_supply + r.shipping_fee)}</td>
+                <td className={overdue(r) ? 'overdue' : ''}><small>{dueText(r)}{overdue(r) && ' · 지남'}</small></td>
                 <td>{dt(r.requested_at)}</td><td>{dt(r.approved_at)}</td><td>{dt(r.completed_at)}</td>
               </tr>
             ))}

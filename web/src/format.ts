@@ -24,9 +24,20 @@ export function vatText(vat: number, taxType?: string) {
 }
 
 export const ROLE_NAMES: Record<string, string> = {
-  HQ_ADMIN: '총괄 관리자', LOGISTICS_MGR: '물류 관리자', HR_MGR: '인적 관리자', SUPERVISOR: '슈퍼바이저',
+  HQ_ADMIN: '총괄 관리자', LOGISTICS_MGR: '물류 관리자', HR_MGR: '인사 관리자', SUPERVISOR: '슈퍼바이저',
   OWNER: '점주', STORE_MGR: '매장 관리자', STAFF: '일반 사원', INVESTOR: '투자자',
 }
 
 /** 물류 구분 (요구 28: 음료 / 디저트 / 식기·포장 / 관리) */
 export const DIVISIONS: Record<string, string> = { BEVERAGE: '음료', DESSERT: '디저트', TABLEWARE: '식기·포장', MANAGEMENT: '관리' }
+
+/** 사이트 구분: 본사 / 매장 / 베이커리 */
+export const SITE_TYPES: Record<string, string> = { HQ: '본사', STORE: '매장', BAKERY: '베이커리' }
+export const HQ_SITE = '00000000-0000-0000-0000-0000000000a0'
+
+/** 금액 입력칸 표시: 숫자만 남겨 세 자리마다 쉼표 (상태값은 쉼표 없는 숫자 문자열 그대로) */
+export function num(v: string | number | null | undefined) {
+  if (v === null || v === undefined || v === '') return ''
+  const d = String(v).replace(/[^\d]/g, '')
+  return d === '' ? '' : Number(d).toLocaleString('ko-KR')
+}

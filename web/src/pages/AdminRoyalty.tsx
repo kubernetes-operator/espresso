@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
 import { useSession } from '../session'
-import { won, day } from '../format'
+import { won, day, num as comma } from '../format'
 
 const TYPE: Record<string, string> = { RATE: '매출 %', FIXED: '정액', RATE_PLUS_FIXED: '% + 정액', TIERED: '구간별 %', NONE: '없음 (직영 등)' }
 const BASE: Record<string, string> = { NET_SALES_EXCL_VAT: '순매출 (VAT 제외)', NET_SALES_INCL_VAT: '순매출 (VAT 포함)', GROSS_SALES_EXCL_VAT: '총매출 (VAT 제외)', GROSS_SALES_INCL_VAT: '총매출 (VAT 포함)' }
@@ -59,11 +59,11 @@ function PolicyModal({ p, stores, onClose, onDone }: any) {
           <div><label htmlFor="ro-base">기준</label><select id="ro-base" value={f.base} onChange={e => setF({ ...f, base: e.target.value })}>{Object.entries(BASE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></div>
         </div>
         {['RATE', 'RATE_PLUS_FIXED'].includes(f.type) && <><label htmlFor="ro-rate">요율 (%)</label><input id="ro-rate" inputMode="decimal" value={f.rate} onChange={e => setF({ ...f, rate: e.target.value })} /></>}
-        {['FIXED', 'RATE_PLUS_FIXED'].includes(f.type) && <><label htmlFor="ro-fixed">정액 (원/월)</label><input id="ro-fixed" inputMode="numeric" value={f.fixedAmount} onChange={e => setF({ ...f, fixedAmount: e.target.value.replace(/\D/g, '') })} /></>}
+        {['FIXED', 'RATE_PLUS_FIXED'].includes(f.type) && <><label htmlFor="ro-fixed">정액 (원/월)</label><input id="ro-fixed" inputMode="numeric" value={comma(f.fixedAmount)} onChange={e => setF({ ...f, fixedAmount: e.target.value.replace(/\D/g, '') })} /></>}
         {f.type === 'TIERED' && <><label htmlFor="ro-tiers">구간 (JSON)</label><textarea id="ro-tiers" rows={3} value={f.tiers} onChange={e => setF({ ...f, tiers: e.target.value })} /></>}
         {f.type !== 'NONE' && <div className="row">
-          <div><label htmlFor="ro-min">최소 (원)</label><input id="ro-min" inputMode="numeric" value={f.minAmount} onChange={e => setF({ ...f, minAmount: e.target.value.replace(/\D/g, '') })} /></div>
-          <div><label htmlFor="ro-max">최대 (원)</label><input id="ro-max" inputMode="numeric" value={f.maxAmount} onChange={e => setF({ ...f, maxAmount: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="ro-min">최소 (원)</label><input id="ro-min" inputMode="numeric" value={comma(f.minAmount)} onChange={e => setF({ ...f, minAmount: e.target.value.replace(/\D/g, '') })} /></div>
+          <div><label htmlFor="ro-max">최대 (원)</label><input id="ro-max" inputMode="numeric" value={comma(f.maxAmount)} onChange={e => setF({ ...f, maxAmount: e.target.value.replace(/\D/g, '') })} /></div>
         </div>}
         <label htmlFor="ro-from">적용 시작일</label><input id="ro-from" type="date" value={f.validFrom} onChange={e => setF({ ...f, validFrom: e.target.value })} />
         {err && <div className="error-box">{err}</div>}
