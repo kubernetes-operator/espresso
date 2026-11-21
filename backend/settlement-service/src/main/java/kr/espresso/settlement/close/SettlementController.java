@@ -17,8 +17,11 @@ public class SettlementController {
     private final JdbcClient db;
 
     private final WeekCloseService weeks;
+    private final PostCloseService post;
 
-    public SettlementController(SettlementService svc, CoreClient core, JdbcClient db, WeekCloseService weeks) { this.svc = svc; this.core = core; this.db = db; this.weeks = weeks; }
+    public SettlementController(SettlementService svc, CoreClient core, JdbcClient db, WeekCloseService weeks, PostCloseService post) {
+        this.svc = svc; this.core = core; this.db = db; this.weeks = weeks; this.post = post;
+    }
 
     /** 월 결산 (매장 1곳 또는 볼 수 있는 매장 합산). 매장관리자는 결산액·로열티 제외 요약 */
     @GetMapping("/settlement")
@@ -150,6 +153,35 @@ public class SettlementController {
         u.require(Roles.HQ_ADMIN);
         svc.reopen(UUID.fromString(b.get("storeId")), b.get("period"), u.id());
         return Map.of("ok", true);
+    }
+
+    // ---------------- 마감 후 처리 (수정 결산) ----------------
+    @GetMapping("/settlement/post-close")
+    public Map<String, Object> postClose(@RequestParam UUID storeId, @RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        core.requireOn(u, storeId, Roles.OWNER);
+        return post.view(storeId, period);
+    }
+
+    @PostMapping("/settlement/post-close/pull")
+    public Map<String, Object> pull(@RequestBody Map<String, String> b) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        return post.pullBack(UUID.fromString(b.get("storeId")), b.get("period"), UUID.fromString(b.get("entryId")), b.get("memo"), u.id());
+    }
+
+    @PostMapping("/settlement/post-close/adjust")
+    public Map<String, Object> adjust(@RequestBody PostCloseService.AdjustReq r) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        return post.adjust(r, u.id());
+    }
+
+    @PostMapping("/settlement/post-close/recalc")
+    public Map<String, Object> recalc(@RequestBody Map<String, String> b) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        return post.recalc(UUID.fromString(b.get("storeId")), b.get("period"), b.get("memo"), u.id());
     }
 
     @GetMapping("/periods")

@@ -34,13 +34,13 @@ export function InvestorPayouts() {
               <td className="num">{won(r.profit)} {!r.closed && <Badge tone="warn">마감 전</Badge>}</td>
               <td className="num">{won(r.calculated_amount)}</td>
               <td className="num"><b>{r.payout ? won(r.payout.decided_amount) : '—'}</b></td>
-              <td>{r.payout ? <Badge tone={r.payout.status === 'PAID' ? 'ok' : 'info'}>{r.payout.status === 'PAID' ? `지급 완료 ${dt(r.payout.paid_at)}` : '결정'}</Badge> : <Badge tone="warn">미결정</Badge>}</td>
+              <td>{r.payout ? <><Badge tone={r.payout.status === 'PAID' ? 'ok' : 'info'}>{r.payout.status === 'PAID' ? `지급 완료 ${dt(r.payout.paid_at)}` : '결정'}</Badge>{r.profit_changed && <> <Badge tone="warn">결산 수정됨 · 재검토</Badge></>}</> : <Badge tone="warn">미결정</Badge>}</td>
               <td className="nowrap"><button className="small" onClick={() => setEdit(r)}>{r.payout ? '수정' : '지급액 결정'}</button></td>
             </tr>))}</tbody>
         </table>
         {d.data && rows.length === 0 && <Empty>투자자 출자 항목이 있는 매장이 없습니다. 투자 관리에서 항목의 자금 출처를 "투자자 출자"로 정하세요.</Empty>}
       </div>
-      <p className="muted small">결산액이 음수면 계산 배분액은 0원입니다. 마감 전 달은 실시간 계산값이라 바뀔 수 있으니, 보통 월 마감 뒤에 결정합니다.</p>
+      <p className="muted small">결산액이 음수면 계산 배분액은 0원입니다. 마감 전 달은 실시간 계산값이라 바뀔 수 있으니, 보통 월 마감 뒤에 결정합니다. 결정한 뒤 마감 후 처리(수정 결산)로 결산액이 바뀌면 "결산 수정됨 · 재검토"가 표시됩니다. [수정]으로 다시 결정하세요.</p>
       {edit && <DecideModal row={edit} period={period} onClose={() => setEdit(null)} onDone={(m: string) => { setEdit(null); setMsg(m); d.reload() }} />}
       <Toast msg={msg} onDone={() => setMsg(null)} />
     </Page>
