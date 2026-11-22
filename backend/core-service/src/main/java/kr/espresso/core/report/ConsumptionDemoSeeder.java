@@ -22,7 +22,7 @@ import java.util.*;
 @Order(9)
 public class ConsumptionDemoSeeder implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(ConsumptionDemoSeeder.class);
-    static final String REF = "DEMO_CONSUMPTION";
+    static final String REF = "DEMO_CONSUMPTION", REF2 = "DEMO_CONSUMPTION_MS";
     private final JdbcClient db;
     private final boolean enabled;
 
@@ -35,7 +35,11 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
         // 데모 디저트 품목 중량 (가상값)
         for (Object[] w : new Object[][]{{"DS-CHZ-10", 1100}, {"DS-TIR-8", 960}, {"SN-CKE-20", 300}})
             db.sql("update catalog.item set net_weight_g = ? where sku = ? and net_weight_g is null").params(w[1], w[0]).update();
-        if (db.sql("select count(*) from inventory.stock_ledger where ref_type = ?").param(REF).query(Integer.class).single() > 0) return;
+        if (db.sql("select count(*) from inventory.stock_ledger where ref_type = ?").param(REF).query(Integer.class).single() == 0) seedBeanBakery();
+        if (db.sql("select count(*) from inventory.stock_ledger where ref_type = ?").param(REF2).query(Integer.class).single() == 0) seedMilkSyrup();
+    }
+
+    void seedBeanBakery() {
         UUID bean = item("CF-HOU-1K"), cake = item("DS-CHZ-10"), tira = item("DS-TIR-8");
         if (bean == null || cake == null || tira == null) return;
         // 매장별 kg당 매출(가상): 원두 1kg당 음료 매출, 베이커리 1kg당 디저트 매출, 원두 손실률, 베이커리 손실률
@@ -63,6 +67,32 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
         log.info("demo consumption history seeded: {} ledger rows", n);
     }
 
+    /** 우유·시럽 (2차): 음료 매출에서 역산 — 매장별 가상 L당 매출 */
+    void seedMilkSyrup() {
+        UUID milk = item("DA-MLK-1L"), oat = item("DA-OAT-1L"), van = item("SY-VAN-1L");
+        if (milk == null || oat == null || van == null) return;
+        Object[][] stores = {   // 우유 1L당 음료 매출, 시럽 1L당 음료 매출, 손실률
+                {DemoIds.STORE_GANGNAM, 34_000.0, 410_000.0, 0.03},
+                {DemoIds.STORE_HONGDAE, 27_000.0, 330_000.0, 0.06},
+                {DemoIds.STORE_PANGYO, 31_000.0, 380_000.0, 0.04}};
+        Random rnd = new Random(23);
+        LocalDate lastSun = LocalDate.now(ZoneId.of("Asia/Seoul")).with(DayOfWeek.MONDAY).minusDays(1);
+        int n = 0;
+        for (Object[] st : stores) {
+            UUID store = (UUID) st[0];
+            for (LocalDate sun = lastSun.minusWeeks(52); !sun.isAfter(lastSun); sun = sun.plusWeeks(1)) {
+                long bev = sales(store, sun.minusDays(6), sun, "BEVERAGE");
+                if (bev <= 0) continue;
+                double milkL = bev / ((Double) st[1] * (0.93 + rnd.nextDouble() * 0.14));
+                double syrupL = bev / ((Double) st[2] * (0.9 + rnd.nextDouble() * 0.2));
+                n += consume(store, milk, 1000, milkL * 0.8, (Double) st[3], sun, rnd, REF2);
+                n += consume(store, oat, 1000, milkL * 0.2, (Double) st[3], sun, rnd, REF2);
+                n += consume(store, van, 1000, syrupL, (Double) st[3] / 2, sun, rnd, REF2);
+            }
+        }
+        log.info("demo milk/syrup consumption seeded: {} ledger rows", n);
+    }
+
     /** 중량이 비어 있는 품목: "원두 1kg"·"박력분 5kg" → kg×1000, "500g" → g, 단위 kg → 1000 × 입수 */
     public static void fillWeights(JdbcClient db) {
         db.sql("""
@@ -71,7 +101,13 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
         db.sql("""
                 update catalog.item set net_weight_g = (substring(name from '([0-9]+(?:\\.[0-9]+)?)\\s*g\\M'))::numeric
                 where net_weight_g is null and name ~ '[0-9]+(\\.[0-9]+)?\\s*g\\M'""").update();
-        db.sql("update catalog.item set net_weight_g = 1000 * pack_qty where net_weight_g is null and lower(unit) = 'kg'").update();
+        db.sql("""
+                update catalog.item set net_weight_g = (substring(name from '([0-9]+(?:\\.[0-9]+)?)\\s*(?:L|ℓ)(?![a-zA-Z])'))::numeric * 1000
+                where net_weight_g is null and name ~ '[0-9]+(\\.[0-9]+)?\\s*(L|ℓ)(?![a-zA-Z])'""").update();
+        db.sql("""
+                update catalog.item set net_weight_g = (substring(name from '([0-9]+(?:\\.[0-9]+)?)\\s*(?:ml|mL|ML)'))::numeric
+                where net_weight_g is null and name ~ '[0-9]+(\\.[0-9]+)?\\s*(ml|mL|ML)'""").update();
+        db.sql("update catalog.item set net_weight_g = 1000 * pack_qty where net_weight_g is null and lower(unit) in ('kg', 'l')").update();
     }
 
     UUID item(String sku) { return db.sql("select id from catalog.item where sku = ?").param(sku).query(UUID.class).optional().orElse(null); }
@@ -83,7 +119,9 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
     }
 
     /** 입고 +q 후 판매 소진·손실(또는 결손)·내부사용으로 같은 양을 소진 (잔량 불변) */
-    int consume(UUID store, UUID item, double weightG, double kg, double lossRate, LocalDate sun, Random rnd) {
+    int consume(UUID store, UUID item, double weightG, double kg, double lossRate, LocalDate sun, Random rnd) { return consume(store, item, weightG, kg, lossRate, sun, rnd, REF); }
+
+    int consume(UUID store, UUID item, double weightG, double kg, double lossRate, LocalDate sun, Random rnd, String ref) {
         double qty = Math.round(kg * 1000 / weightG * 10) / 10.0;
         if (qty <= 0) return 0;
         long cost = db.sql("select base_price from catalog.item where id = ?").param(item).query(Long.class).single();
@@ -94,17 +132,17 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
         double sale = Math.round((qty - loss - internal) * 10) / 10.0;
         String lossReason = rnd.nextBoolean() ? "LOSS" : "SHORTAGE";
         int n = 0;
-        n += row(store, item, qty, cost, "RECEIPT", bal, at.minusDays(6));
-        n += row(store, item, -sale, cost, "SALE", bal, at);
-        n += row(store, item, -loss, cost, lossReason, bal, at);
-        n += row(store, item, -internal, cost, "INTERNAL_USE", bal, at);
+        n += row(store, item, qty, cost, "RECEIPT", bal, at.minusDays(6), ref);
+        n += row(store, item, -sale, cost, "SALE", bal, at, ref);
+        n += row(store, item, -loss, cost, lossReason, bal, at, ref);
+        n += row(store, item, -internal, cost, "INTERNAL_USE", bal, at, ref);
         return n;
     }
 
-    int row(UUID store, UUID item, double q, long cost, String reason, double bal, OffsetDateTime at) {
+    int row(UUID store, UUID item, double q, long cost, String reason, double bal, OffsetDateTime at, String ref) {
         if (q == 0) return 0;
         db.sql("insert into inventory.stock_ledger(store_id, item_id, qty_delta, unit_cost, amount, reason, ref_type, balance_qty, occurred_at, actor_id) values (?,?,?,?,?,?,?,?,?,?)")
-                .params(store, item, q, cost, Math.round(q * cost), reason, REF, bal, at, DemoIds.ADMIN).update();
+                .params(store, item, q, cost, Math.round(q * cost), reason, ref, bal, at, DemoIds.ADMIN).update();
         return 1;
     }
 }

@@ -45,7 +45,7 @@ export function AdminCatalog() {
               <tr key={i.id} className={i.is_active ? '' : 'inactive'}>
                 <td><code>{i.sku}</code></td>
                 <td>{i.name} {i.is_asset && <Badge tone="info">{i.division_code === 'TABLEWARE' ? '비품' : '설비'}</Badge>} {!i.is_active && <Badge>중지</Badge>}</td>
-                <td><small>{i.division_name} · {i.category_name}{i.net_weight_g != null ? ` · ${Number(i.net_weight_g).toLocaleString('ko-KR')}g` : i.consumption_group ? ' · 중량 미입력' : ''}</small></td>
+                <td><small>{i.division_name} · {i.category_name}{i.net_weight_g != null ? ` · ${Number(i.net_weight_g).toLocaleString('ko-KR')}${i.consumption_group === 'MILK' || i.consumption_group === 'SYRUP' ? 'g·ml' : 'g'}` : i.consumption_group ? ' · 중량·용량 미입력' : ''}</small></td>
                 <td>{i.tax_type === 'EXEMPT' ? <Badge>면세</Badge> : '과세'}</td>
                 {hqView && <td className="num">{i.hq_cost != null ? won(i.hq_cost) : <span className="muted">—</span>}</td>}
                 <td className="num">{won(i.base_price)}</td>
@@ -141,7 +141,7 @@ function ItemModal({ item, cats, onClose, onDone }: any) {
         <label htmlFor="it-name">품명</label><input id="it-name" required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} />
         <div className="row">
           <div><label htmlFor="it-unit">단위</label><input id="it-unit" required value={f.unit} onChange={e => setF({ ...f, unit: e.target.value })} /></div>
-          <div><label htmlFor="it-wt">단위당 중량 (g){item.consumption_group && <small className="muted"> · 재고 소비 분석에 사용</small>}</label><input id="it-wt" inputMode="decimal" value={f.netWeightG} placeholder="예: 원두 1kg → 1000" onChange={e => setF({ ...f, netWeightG: e.target.value.replace(/[^\d.]/g, '') })} /></div>
+          <div><label htmlFor="it-wt">단위당 중량·용량 (g·ml){item.consumption_group && <small className="muted"> · 재고 소비 분석에 사용</small>}</label><input id="it-wt" inputMode="decimal" value={f.netWeightG} placeholder="예: 원두 1kg → 1000, 우유 1L → 1000" onChange={e => setF({ ...f, netWeightG: e.target.value.replace(/[^\d.]/g, '') })} /></div>
           <div><label htmlFor="it-tax">과세</label><select id="it-tax" value={f.taxType} onChange={e => setF({ ...f, taxType: e.target.value })}><option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
         </div>
         <div className="row">

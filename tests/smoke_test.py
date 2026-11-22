@@ -551,23 +551,30 @@ check("발생 건 금액 = 손익 금액 (VAT 제외 50,000)", any(a["kind"] == 
 if not was_closed:
     check("마감 취소 (수정 결산 로열티 차액 포함 되돌림)", req("POST", "/api/stl/settlement/reopen", tok("admin"), {"storeId": GN, "period": P3})[0] == 200)
 
-section("13. 4차 요청: 재고 소비 분석 (원두·베이커리 kg 대비 매출, 손실 비중)")
+section("13. 4차 요청: 재고 소비 분석 (물류·판매 금액 기준 추정 지표: 원두·우유·시럽·베이커리)")
 s, cs = req("GET", f"/api/core/reports/consumption?unit=month&count=6&storeId={GN}", tok("owner1"))
 rows = cs["stores"][0]["rows"] if s == 200 and cs.get("stores") else []
-past = [r for r in rows[:-1] if r["bean"]["used_kg"] > 0 and r["bakery"]["used_kg"] > 0]
-check("owner1 월별 소비 분석 (6개월, 원두·베이커리 소비 있음)", s == 200 and len(cs["buckets"]) == 6 and past, str(cs)[:120])
+past = [r for r in rows if not r["in_progress"] and all(r[g]["qty"] > 0 for g in ("bean", "milk", "syrup", "bakery"))]
+check("owner1 월별 분석: 기본 물류 입고 기준, 원두·우유·시럽·베이커리", s == 200 and cs["basis"] == "receipt" and len(cs["buckets"]) == 6
+      and [g["key"] for g in cs["groups"]] == ["bean", "milk", "syrup", "bakery"] and past, str(cs)[:120])
 if past:
-    b0 = past[-1]["bean"]
-    check("원두 kg당 음료 매출 = 음료 매출 ÷ 소비 kg · 소비 = 판매 소진 + 손실 + 내부사용",
-          abs(b0["sales_per_kg"] - b0["sales"] / b0["used_kg"]) <= max(1, b0["sales_per_kg"] * 0.001)
-          and abs(b0["used_kg"] - (b0["sale_kg"] + b0["loss_kg"] + b0["internal_kg"])) < 0.05 and b0["loss_ratio"] is not None, str(b0))
+    b0 = past[-1]["bean"]; m0 = past[-1]["milk"]
+    check("입고 기준: 1kg당 음료 매출 = 음료 매출 ÷ 입고량, 물류 비율 = 물류 금액 ÷ 매출",
+          b0["qty"] == b0["receipt_qty"] and abs(b0["per_unit"] - b0["sales"] / b0["qty"]) <= max(1, b0["per_unit"] * 0.001)
+          and abs(b0["cost_ratio"] - b0["cost"] / b0["sales"] * 100) < 0.11, str(b0))
+    check("우유·원두는 같은 음료 매출과 비교", m0["sales"] == b0["sales"] and m0["per_unit"] > 0)
+    s, cu = req("GET", f"/api/core/reports/consumption?unit=month&count=6&basis=usage&storeId={GN}", tok("owner1"))
+    u0 = [r for r in cu["stores"][0]["rows"] if r["bucket"] == past[-1]["bucket"]][0]["bean"]
+    check("소진 기준: 기준량 = 판매 소진 + 손실 + 내부사용", cu["basis"] == "usage" and abs(u0["qty"] - (u0["sale_qty"] + u0["loss_qty"] + u0["internal_qty"])) < 0.05, str(u0))
 s, cw = req("GET", "/api/core/reports/consumption?unit=week&count=4", tok("admin"))
-check("주별 소비 분석 (월요일 시작 4주, 매장 비교)", s == 200 and len(cw["buckets"]) == 4
-      and all(datetime.date.fromisoformat(b).weekday() == 0 for b in cw["buckets"]) and len(cw["stores"]) >= 3)
+check("주별 분석 (월요일 시작 4주, 매장 비교, 이번 주 진행 중)", s == 200 and len(cw["buckets"]) == 4
+      and all(datetime.date.fromisoformat(b).weekday() == 0 for b in cw["buckets"]) and len(cw["stores"]) >= 3 and cw["total"][-1]["in_progress"])
 check("staff1 소비 분석 불가 (403)", req("GET", "/api/core/reports/consumption", tok("staff1"))[0] == 403)
+s, its = req("GET", "/api/core/catalog/items?q=DA-MLK-1L", tok("logi"))
+check("우유 1L → 용량 1000 자동, 그룹 MILK", s == 200 and its and float(its[0]["net_weight_g"]) == 1000 and its[0]["consumption_group"] == "MILK", str(its)[:120])
 s, its = req("GET", "/api/core/catalog/items?q=DS-CHZ-10", tok("logi"))
 it = its[0] if s == 200 and its else {}
-check("품목 단위당 중량 표시 (치즈케이크)", it.get("net_weight_g") is not None and it.get("consumption_group") == "BAKERY", str(it)[:120])
+check("품목 단위당 중량 표시 (치즈케이크, 베이커리)", it.get("net_weight_g") is not None and it.get("consumption_group") == "BAKERY", str(it)[:120])
 w0 = it.get("net_weight_g")
 check("단위당 중량 수정", req("PUT", f"/api/core/catalog/items/{it.get('id')}", tok("logi"), {"netWeightG": 1234})[0] == 200
       and float(req("GET", "/api/core/catalog/items?q=DS-CHZ-10", tok("logi"))[1][0]["net_weight_g"]) == 1234)
