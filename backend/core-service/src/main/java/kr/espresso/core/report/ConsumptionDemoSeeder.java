@@ -19,7 +19,7 @@ import java.util.*;
  * 같은 양의 입고(RECEIPT)와 소진(판매 소진·손실·결손·내부사용)을 짝으로 넣어 재고 잔량은 바뀌지 않게 함.
  */
 @Component
-@Order(6)
+@Order(9)
 public class ConsumptionDemoSeeder implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(ConsumptionDemoSeeder.class);
     static final String REF = "DEMO_CONSUMPTION";
@@ -30,6 +30,7 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        fillWeights(db);   // 마이그레이션 뒤에 만들어진 품목(데모 시드 등)도 품명·단위로 중량 채움
         if (!enabled) return;
         // 데모 디저트 품목 중량 (가상값)
         for (Object[] w : new Object[][]{{"DS-CHZ-10", 1100}, {"DS-TIR-8", 960}, {"SN-CKE-20", 300}})
@@ -60,6 +61,17 @@ public class ConsumptionDemoSeeder implements ApplicationRunner {
             }
         }
         log.info("demo consumption history seeded: {} ledger rows", n);
+    }
+
+    /** 중량이 비어 있는 품목: "원두 1kg"·"박력분 5kg" → kg×1000, "500g" → g, 단위 kg → 1000 × 입수 */
+    public static void fillWeights(JdbcClient db) {
+        db.sql("""
+                update catalog.item set net_weight_g = (substring(name from '([0-9]+(?:\\.[0-9]+)?)\\s*(?:kg|KG|Kg)'))::numeric * 1000
+                where net_weight_g is null and name ~ '[0-9]+(\\.[0-9]+)?\\s*(kg|KG|Kg)'""").update();
+        db.sql("""
+                update catalog.item set net_weight_g = (substring(name from '([0-9]+(?:\\.[0-9]+)?)\\s*g\\M'))::numeric
+                where net_weight_g is null and name ~ '[0-9]+(\\.[0-9]+)?\\s*g\\M'""").update();
+        db.sql("update catalog.item set net_weight_g = 1000 * pack_qty where net_weight_g is null and lower(unit) = 'kg'").update();
     }
 
     UUID item(String sku) { return db.sql("select id from catalog.item where sku = ?").param(sku).query(UUID.class).optional().orElse(null); }

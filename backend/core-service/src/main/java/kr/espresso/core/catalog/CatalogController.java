@@ -129,6 +129,7 @@ public class CatalogController {
                 .params(id, sku, r.name().trim(), r.categoryId(), Objects.requireNonNullElse(r.unit(), "ea"),
                         Objects.requireNonNullElse(r.taxType(), "TAXABLE"), r.basePrice(), r.hqCost(), asset, r.barcode(),
                         r.netWeightG() == null || r.netWeightG().signum() <= 0 ? null : r.netWeightG()).update();
+        if (r.netWeightG() == null) kr.espresso.core.report.ConsumptionDemoSeeder.fillWeights(db);   // 비우면 품명·단위로 추정 (예: 1kg → 1000g)
         return Map.of("id", id, "sku", sku);
     }
 
