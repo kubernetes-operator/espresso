@@ -52,6 +52,10 @@ export function LineChart({ labels, series, fmt, axisFmt, height = 240, title }:
   const lastIdx = (vs: Series['values']) => { for (let i = vs.length - 1; i >= 0; i--) if (vs[i] != null) return i; return -1 }
   const tipLeft = hover == null ? 0 : (x(hover) / W) * 100
   if (vals.length === 0) return <div className="empty">표시할 데이터가 없습니다.</div>
+  // 끝점 직접 라벨: 겹치지 않게 최소 13px 간격으로 위아래 밀기 (한 계열이면 제목이 이름을 대신하므로 생략)
+  const endY: number[] = series.map(sr => { const li = lastIdx(sr.values); return li >= 0 ? y(sr.values[li] as number) + 4 : 0 })
+  const order = series.map((_, i) => i).filter(i => lastIdx(series[i].values) >= 0).sort((a, b) => endY[a] - endY[b])
+  for (let k = 1; k < order.length; k++) if (endY[order[k]] - endY[order[k - 1]] < 13) endY[order[k]] = endY[order[k - 1]] + 13
   return (
     <div className="chart" ref={ref}>
       {series.length > 1 && <div className="chart-legend" aria-hidden>
@@ -65,14 +69,14 @@ export function LineChart({ labels, series, fmt, axisFmt, height = 240, title }:
           {labels.map((l, i) => (labels.length <= Math.floor((W - L - R) / 46) || i % 2 === 0) && <text key={l + i} x={x(i)} y={H - 8} textAnchor="middle">{l}</text>)}
         </g>
         {hover != null && <line className="cross" x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} />}
-        {series.map(s => {
+        {series.map((s, si) => {
           const li = lastIdx(s.values)
           return (
             <g key={s.key} className="series">
               <path d={path(s.values)} style={{ stroke: s.color }} strokeDasharray={s.dash ? '6 4' : undefined} />
               {s.values.map((v, i) => v != null && (hover === i || labels.length <= 1) &&
                 <circle key={i} cx={x(i)} cy={y(v)} r={4} style={{ fill: s.color }} />)}
-              {li >= 0 && series.length <= 4 && <text x={x(li) + 8} y={y(s.values[li] as number) + 4} className="axis" style={{ fill: 'var(--muted)', fontSize: 11 }}>{s.name}</text>}
+              {li >= 0 && series.length > 1 && series.length <= 4 && <text x={x(li) + 8} y={endY[si]} className="axis" style={{ fill: 'var(--muted)', fontSize: 11 }}>{s.name}</text>}
             </g>
           )
         })}
