@@ -551,7 +551,29 @@ check("발생 건 금액 = 손익 금액 (VAT 제외 50,000)", any(a["kind"] == 
 if not was_closed:
     check("마감 취소 (수정 결산 로열티 차액 포함 되돌림)", req("POST", "/api/stl/settlement/reopen", tok("admin"), {"storeId": GN, "period": P3})[0] == 200)
 
-section("13. 게이트웨이")
+section("13. 4차 요청: 재고 소비 분석 (원두·베이커리 kg 대비 매출, 손실 비중)")
+s, cs = req("GET", f"/api/core/reports/consumption?unit=month&count=6&storeId={GN}", tok("owner1"))
+rows = cs["stores"][0]["rows"] if s == 200 and cs.get("stores") else []
+past = [r for r in rows[:-1] if r["bean"]["used_kg"] > 0 and r["bakery"]["used_kg"] > 0]
+check("owner1 월별 소비 분석 (6개월, 원두·베이커리 소비 있음)", s == 200 and len(cs["buckets"]) == 6 and past, str(cs)[:120])
+if past:
+    b0 = past[-1]["bean"]
+    check("원두 kg당 음료 매출 = 음료 매출 ÷ 소비 kg · 소비 = 판매 소진 + 손실 + 내부사용",
+          abs(b0["sales_per_kg"] - b0["sales"] / b0["used_kg"]) <= max(1, b0["sales_per_kg"] * 0.001)
+          and abs(b0["used_kg"] - (b0["sale_kg"] + b0["loss_kg"] + b0["internal_kg"])) < 0.05 and b0["loss_ratio"] is not None, str(b0))
+s, cw = req("GET", "/api/core/reports/consumption?unit=week&count=4", tok("admin"))
+check("주별 소비 분석 (월요일 시작 4주, 매장 비교)", s == 200 and len(cw["buckets"]) == 4
+      and all(datetime.date.fromisoformat(b).weekday() == 0 for b in cw["buckets"]) and len(cw["stores"]) >= 3)
+check("staff1 소비 분석 불가 (403)", req("GET", "/api/core/reports/consumption", tok("staff1"))[0] == 403)
+s, its = req("GET", "/api/core/catalog/items?q=DS-CHZ-10", tok("logi"))
+it = its[0] if s == 200 and its else {}
+check("품목 단위당 중량 표시 (치즈케이크)", it.get("net_weight_g") is not None and it.get("consumption_group") == "BAKERY", str(it)[:120])
+w0 = it.get("net_weight_g")
+check("단위당 중량 수정", req("PUT", f"/api/core/catalog/items/{it.get('id')}", tok("logi"), {"netWeightG": 1234})[0] == 200
+      and float(req("GET", "/api/core/catalog/items?q=DS-CHZ-10", tok("logi"))[1][0]["net_weight_g"]) == 1234)
+req("PUT", f"/api/core/catalog/items/{it.get('id')}", tok("logi"), {"netWeightG": w0})
+
+section("14. 게이트웨이")
 check("웹 화면 응답", req("GET", "/login")[0] == 200)
 
 total = len(results); fails = [r for r in results if not r[0]]

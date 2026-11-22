@@ -96,7 +96,8 @@ public class CatalogController {
         CurrentUser u = CurrentUser.get();
         if (storeId != null) scope.check(u, storeId);
         return db.sql("""
-                select i.id, i.sku, i.name, i.unit, i.tax_type, i.base_price, i.hq_cost, i.is_asset, i.is_active, i.barcode,
+                select i.id, i.sku, i.name, i.unit, i.net_weight_g, i.tax_type, i.base_price, i.hq_cost, i.is_asset, i.is_active, i.barcode,
+                       c.consumption_group,
                        i.category_id, c.name as category_name, c.division_code, d.name as division_name,
                        sp.id as store_price_id, sp.unit_price as store_unit_price, sp.discount_type, sp.discount_value,
                        coalesce(sp.unit_price, i.base_price) as list_price
@@ -114,7 +115,7 @@ public class CatalogController {
     }
 
     public record ItemReq(String sku, String name, UUID categoryId, String unit, String taxType, Long basePrice,
-                          Boolean isActive, String barcode, Long hqCost) {}
+                          Boolean isActive, String barcode, Long hqCost, BigDecimal netWeightG) {}
 
     @PostMapping("/items")
     public Map<String, Object> createItem(@RequestBody ItemReq r) {
@@ -124,9 +125,11 @@ public class CatalogController {
         checkSku(sku, null);
         boolean asset = assetFor(r.categoryId(), r.basePrice());
         UUID id = UUID.randomUUID();
-        db.sql("insert into catalog.item(id, sku, name, category_id, unit, tax_type, base_price, hq_cost, is_asset, barcode) values (?,?,?,?,?,?,?,?,?,?)")
+        db.sql("insert into catalog.item(id, sku, name, category_id, unit, tax_type, base_price, hq_cost, is_asset, barcode, net_weight_g) values (?,?,?,?,?,?,?,?,?,?,?)")
                 .params(id, sku, r.name().trim(), r.categoryId(), Objects.requireNonNullElse(r.unit(), "ea"),
-                        Objects.requireNonNullElse(r.taxType(), "TAXABLE"), r.basePrice(), r.hqCost(), asset, r.barcode()).update();
+                        Objects.requireNonNullElse(r.taxType(), "TAXABLE"), r.basePrice(), r.hqCost(), asset, r.barcode(),
+                        r.netWeightG() == null || r.netWeightG().signum() <= 0 ? null : r.netWeightG()).update();
+        if (r.netWeightG() == null) kr.espresso.core.report.ConsumptionDemoSeeder.fillWeights(db);   // 비우면 품명·단위로 추정 (예: 1kg → 1000g)
         return Map.of("id", id, "sku", sku);
     }
 
@@ -139,6 +142,8 @@ public class CatalogController {
             db.sql("update catalog.item set sku = ? where id = ?").params(sku, id).update();
         }
         if (r.hqCost() != null) db.sql("update catalog.item set hq_cost = ? where id = ?").params(r.hqCost() < 0 ? null : r.hqCost(), id).update();
+        if (r.netWeightG() != null)   // 0 이하 = 지움
+            db.sql("update catalog.item set net_weight_g = ? where id = ?").params(r.netWeightG().signum() <= 0 ? null : r.netWeightG(), id).update();
         db.sql("""
                 update catalog.item set name = coalesce(cast(:n as varchar), name), unit = coalesce(cast(:u as varchar), unit),
                   tax_type = coalesce(cast(:t as varchar), tax_type), base_price = coalesce(cast(:p as bigint), base_price),
