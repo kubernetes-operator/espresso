@@ -37,7 +37,7 @@ while time.time() - start < LIMIT:
         assert stl["stores"][0]["net_sales"] > 0
         step = "마지막 데모 시드(재고 소비 이력)"   # core 의 데모 시드는 순서대로 실행 → 마지막 것이 끝났으면 급여·근무표 시드도 끝난 것
         cs = call(f"/api/core/reports/consumption?unit=month&count=3&storeId={GN}", tok)
-        assert any(r["bean"]["used_kg"] > 0 for r in cs["stores"][0]["rows"])
+        assert any(r["bean"]["qty"] > 0 and r["milk"]["qty"] > 0 for r in cs["stores"][0]["rows"])
         print(f"준비 완료 ({int(time.time() - start)}초)")
         sys.exit(0)
     except (urllib.error.URLError, AssertionError, KeyError, TypeError, ConnectionError, TimeoutError, json.JSONDecodeError):
