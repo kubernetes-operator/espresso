@@ -1,6 +1,7 @@
 package kr.espresso.core.support;
 
 import kr.espresso.common.DemoIds;
+import kr.espresso.common.Sites;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,9 +29,10 @@ public class CoreDemoSeeder implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         if (!enabled) return;
         seedTableware();
-        if (db.sql("select count(*) from store.store").query(Integer.class).single() > 0) return;
+        if (db.sql("select count(*) from store.store where site_type = 'STORE'").query(Integer.class).single() > 0) { seedR1(); return; }
 
-        db.sql("insert into store.region(id, code, name, sort_order) values (?, 'SEOUL', '서울 권역', 1), (?, 'GYEONGGI', '경기 권역', 2)")
+        // 권역은 V6 마이그레이션이 시·도 단위로 넣음 (서울특별시·경기도는 데모 고정 ID)
+        db.sql("insert into store.region(id, code, name, sort_order) values (?, 'SEOUL', '서울특별시', 1), (?, 'GYEONGGI', '경기도', 9) on conflict (code) do nothing")
                 .params(DemoIds.REGION_SEOUL, DemoIds.REGION_GYEONGGI).update();
         store(DemoIds.STORE_GANGNAM, "GN01", "강남점", DemoIds.REGION_SEOUL, "FRANCHISE", "EXCLUSIVE", true, "서울시 강남구 (데모)");
         store(DemoIds.STORE_HONGDAE, "HD01", "홍대점", DemoIds.REGION_SEOUL, "FRANCHISE", "INCLUSIVE", false, "서울시 마포구 (데모)");
@@ -84,6 +86,32 @@ public class CoreDemoSeeder implements ApplicationRunner {
             db.sql("insert into catalog.logistics_package_item(package_id, item_id, qty) select ?, id, ? from catalog.item where sku = ?")
                     .params(pkg, new java.math.BigDecimal(p[1]), p[0]).update();
         log.info("core demo data seeded");
+        seedR1();
+    }
+
+    /**
+     * 1차 점검 반영 데모 (기존 DB 에도 1회): 센트럴 베이커리 사이트, 본사 매입 단가(기준가의 80%), 본사 창고 기초 재고
+     */
+    private void seedR1() {
+        if (db.sql("select count(*) from store.store where id = ?").param(DemoIds.BAKERY_CENTRAL).query(Integer.class).single() == 0) {
+            db.sql("""
+                    insert into store.store(id, code, name, region_id, status, business_type, site_type, vat_display_mode, address, open_date, biz_name)
+                    values (?, 'BK01', '센트럴 베이커리', ?, 'OPEN', 'DIRECT', 'BAKERY', 'EXCLUSIVE', '경기도 성남시 (데모)', date '2026-01-15', '카페 드 리옹 베이커리')""")
+                    .params(DemoIds.BAKERY_CENTRAL, DemoIds.REGION_GYEONGGI).update();
+            log.info("demo bakery site seeded");
+        }
+        db.sql("update catalog.item set hq_cost = round(base_price * 0.8) where hq_cost is null").update();
+        if (db.sql("select count(*) from inventory.stock_balance where store_id = ?").param(Sites.HQ).query(Integer.class).single() == 0) {
+            var items = db.sql("select id, hq_cost from catalog.item where is_active and is_hq_supplied and not is_asset").query().listOfRows();
+            for (var i : items) {
+                java.math.BigDecimal qty = new java.math.BigDecimal(200);
+                long cost = ((Number) i.get("hq_cost")).longValue();
+                db.sql("insert into inventory.stock_balance(store_id, item_id, qty, avg_cost) values (?,?,?,?)").params(Sites.HQ, i.get("id"), qty, cost).update();
+                db.sql("insert into inventory.stock_ledger(store_id, item_id, qty_delta, unit_cost, amount, reason, ref_type, balance_qty) values (?,?,?,?,?, 'OPENING', 'DEMO', ?)")
+                        .params(Sites.HQ, i.get("id"), qty, cost, cost * 200, qty).update();
+            }
+            log.info("demo HQ warehouse opening stock seeded: {} items", items.size());
+        }
     }
 
     /** 식기·포장 구분 데모 품목 (기존 DB 에도 1회 추가: sku 기준) */
@@ -109,7 +137,7 @@ public class CoreDemoSeeder implements ApplicationRunner {
                 insert into store.store(id, code, name, region_id, status, business_type, vat_display_mode,
                   owner_payroll_detail_visible, address, open_date, biz_name)
                 values (?,?,?,?, 'OPEN', ?,?,?,?, date '2026-01-15', ?)""")
-                .params(id, code, name, region, type, vat, ownerPay, addr, "에스프레소 " + name).update();
+                .params(id, code, name, region, type, vat, ownerPay, addr, "카페 드 리옹 " + name).update();
     }
 
     private void lease(UUID store, long deposit, long rent, long fee) {

@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox } from '../components/ui'
 import { useSession } from '../session'
-import { won, DIVISIONS } from '../format'
+import { won, DIVISIONS, num } from '../format'
+import { checkRequired } from '../components/enhance'
 
 type Item = { id: string; sku: string; name: string; unit: string; tax_type: string; list_price: number; base_price: number; discount_type: string | null; discount_value: number | null; division_code: string; category_name: string; is_asset: boolean }
 type Line = { key: string; sourceType: 'HQ' | 'EXTERNAL'; itemId?: string; name: string; unit: string; qty: number; taxType: string
@@ -32,7 +33,10 @@ function calc(l: Line) {
 export function LogisticsNew() {
   const s = useSession()
   const nav = useNavigate()
-  const [storeId, setStoreId] = useState(s.storeId !== 'ALL' ? s.storeId : s.stores[0]?.id ?? '')
+  // 상단에서 매장을 골랐으면 그 매장으로 고정, 전체(또는 본사)면 요청할 매장을 고름
+  const reqSites = s.stores.filter(x => (x.site_type ?? 'STORE') !== 'HQ')
+  const locked = s.storeId !== 'ALL' && reqSites.some(x => x.id === s.storeId)
+  const [storeId, setStoreId] = useState(locked ? s.storeId : reqSites[0]?.id ?? '')
   const [tab, setTab] = useState<'HQ' | 'EXTERNAL'>('HQ')
   const [division, setDivision] = useState('')
   const [q, setQ] = useState('')
@@ -61,8 +65,9 @@ export function LogisticsNew() {
   const [ext, setExt] = useState({ externalUrl: '', name: '', vendorName: '', categoryId: '', unitPrice: '', qty: '1', priceInputMode: 'INCLUSIVE', taxType: 'TAXABLE', payer: 'STORE', shippingFee: '0' })
   const addExt = () => {
     setErr(null)
-    if (!/^https?:\/\//i.test(ext.externalUrl)) { setErr('http:// 또는 https:// 로 시작하는 주소를 넣으세요.'); return }
-    if (!ext.name || !ext.categoryId || !ext.unitPrice) { setErr('품명, 카테고리, 단가를 입력하세요.'); return }
+    const box = document.getElementById('ext-form')
+    if (box && checkRequired(box).length) return
+    if (!/^https?:\/\//i.test(ext.externalUrl)) { setErr('상품 주소는 http:// 또는 https:// 로 시작해야 합니다.'); return }
     setLines(ls => [...ls, { key: 'x' + Date.now() + Math.random(), sourceType: 'EXTERNAL', name: ext.name, unit: 'ea', qty: Number(ext.qty) || 1, taxType: ext.taxType, listPrice: 0,
       externalUrl: ext.externalUrl, vendorName: ext.vendorName, categoryId: ext.categoryId, unitPrice: Number(ext.unitPrice), priceInputMode: ext.priceInputMode, payer: ext.payer, shippingFee: Number(ext.shippingFee) || 0 }])
     setExt({ ...ext, externalUrl: '', name: '', vendorName: '', unitPrice: '', qty: '1', shippingFee: '0' })
@@ -92,11 +97,12 @@ export function LogisticsNew() {
     <Page title="물류 요청 작성" sub={<>매장별 단가·할인이 자동 적용됩니다 · <Badge tone={inc ? 'accent' : 'neutral'}>VAT {inc ? '포함' : '별도'} 표시</Badge></>}>
       <div className="card form-inline">
         <div><label htmlFor="ln-store">매장</label>
+          {locked ? <b id="ln-store">{store?.name}</b> :
           <select id="ln-store" value={storeId} onChange={e => { setStoreId(e.target.value); setLines([]) }}>
-            {s.stores.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-          </select></div>
+            {reqSites.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>}</div>
         <div className="grow"><label htmlFor="ln-title">제목</label><input id="ln-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="예: 11월 3주 원두·컵" /></div>
-        <div><label htmlFor="ln-date">희망일</label><input id="ln-date" type="date" value={desired} onChange={e => setDesired(e.target.value)} /></div>
+        <div><label htmlFor="ln-date">요청 기한</label><input id="ln-date" type="date" value={desired} min={new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)} onChange={e => setDesired(e.target.value)} /></div>
       </div>
       <div className="split">
         <section className="card">
@@ -134,30 +140,33 @@ export function LogisticsNew() {
               })}
             </div>
           </>) : (
-            <div className="form">
+            <div className="form" id="ext-form">
               <label htmlFor="ex-url">상품 주소 (URL)</label>
-              <input id="ex-url" value={ext.externalUrl} onChange={e => setExt({ ...ext, externalUrl: e.target.value })} placeholder="https://" />
+              <input id="ex-url" required value={ext.externalUrl} onChange={e => setExt({ ...ext, externalUrl: e.target.value })} placeholder="https://" />
               <div className="row">
-                <div><label htmlFor="ex-name">품명</label><input id="ex-name" value={ext.name} onChange={e => setExt({ ...ext, name: e.target.value })} /></div>
+                <div><label htmlFor="ex-name">품명</label><input id="ex-name" required value={ext.name} onChange={e => setExt({ ...ext, name: e.target.value })} /></div>
                 <div><label htmlFor="ex-vendor">판매처</label><input id="ex-vendor" value={ext.vendorName} onChange={e => setExt({ ...ext, vendorName: e.target.value })} /></div>
               </div>
               <label htmlFor="ex-cat">카테고리</label>
-              <select id="ex-cat" value={ext.categoryId} onChange={e => setExt({ ...ext, categoryId: e.target.value })}>
+              <select id="ex-cat" required value={ext.categoryId} onChange={e => setExt({ ...ext, categoryId: e.target.value })}>
                 <option value="">선택</option>
-                {(cats.data ?? []).map(c => <option key={c.id} value={c.id}>{c.division_name} · {c.name}</option>)}
+                {[...new Set((cats.data ?? []).map(c => c.division_name))].map(d => <optgroup key={d} label={d}>
+                  {(cats.data ?? []).filter(c => c.division_name === d).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup>)}
               </select>
-              <div className="row">
-                <div><label htmlFor="ex-price">단가 (원)</label><input id="ex-price" inputMode="numeric" value={ext.unitPrice} onChange={e => setExt({ ...ext, unitPrice: e.target.value.replace(/\D/g, '') })} /></div>
+              <div className="row two">
+                <div><label htmlFor="ex-price">단가 (원)</label><input id="ex-price" required inputMode="numeric" value={num(ext.unitPrice)} onChange={e => setExt({ ...ext, unitPrice: e.target.value.replace(/\D/g, '') })} /></div>
                 <div><label htmlFor="ex-mode">단가 기준</label>
                   <select id="ex-mode" value={ext.priceInputMode} onChange={e => setExt({ ...ext, priceInputMode: e.target.value })}>
                     <option value="INCLUSIVE">VAT 포함 금액</option><option value="EXCLUSIVE">VAT 별도 금액</option></select></div>
+              </div>
+              <div className="row two">
                 <div><label htmlFor="ex-tax">과세</label>
                   <select id="ex-tax" value={ext.taxType} onChange={e => setExt({ ...ext, taxType: e.target.value })}>
                     <option value="TAXABLE">과세</option><option value="EXEMPT">면세</option></select></div>
+                <div><label htmlFor="ex-qty">수량</label><input id="ex-qty" required inputMode="decimal" value={ext.qty} onChange={e => setExt({ ...ext, qty: e.target.value })} /></div>
               </div>
-              <div className="row">
-                <div><label htmlFor="ex-qty">수량</label><input id="ex-qty" inputMode="decimal" value={ext.qty} onChange={e => setExt({ ...ext, qty: e.target.value })} /></div>
-                <div><label htmlFor="ex-ship">배송비 (원)</label><input id="ex-ship" inputMode="numeric" value={ext.shippingFee} onChange={e => setExt({ ...ext, shippingFee: e.target.value.replace(/\D/g, '') })} /></div>
+              <div className="row two">
+                <div><label htmlFor="ex-ship">배송비 (원)</label><input id="ex-ship" inputMode="numeric" value={num(ext.shippingFee)} onChange={e => setExt({ ...ext, shippingFee: e.target.value.replace(/\D/g, '') })} /></div>
                 <div><label htmlFor="ex-payer">결제 주체</label>
                   <select id="ex-payer" value={ext.payer} onChange={e => setExt({ ...ext, payer: e.target.value })}>
                     <option value="STORE">매장 결제</option><option value="HQ">본사 결제 (정산서 청구)</option></select></div>

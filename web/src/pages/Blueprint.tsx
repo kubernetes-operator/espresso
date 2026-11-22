@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import mermaid from 'mermaid'
+import { Navigate } from 'react-router-dom'
 import { Page } from '../components/ui'
+import { useSession } from '../session'
 
 const ARCH = `flowchart LR
   subgraph C["사용자 화면"]
@@ -33,7 +35,7 @@ const ARCH = `flowchart LR
 const ORG = `flowchart TB
   HQ["총괄 관리자"]
   HQ --> L["물류 관리자"]
-  HQ --> H["인적 관리자"]
+  HQ --> H["인사 관리자"]
   HQ -.-> SV["슈퍼바이저 (비활성)"]
   HQ --> O["점주"]
   O --> SM["매장 관리자"]
@@ -85,6 +87,9 @@ function Diagram({ id, code }: { id: string; code: string }) {
 }
 
 export function Blueprint() {
+  const s = useSession()
+  // 투자자는 설계도 불필요 (요청 반영) — 투자자 등급만 가진 계정은 홈으로
+  if (s.roles.size > 0 && [...s.roles].every(r => r === 'INVESTOR')) return <Navigate to="/" replace />
   return (
     <Page title="설계도" sub="설계서 v0.3 요약 · 전체 문서는 저장소 docs/ 폴더">
       <div className="grid2">
@@ -98,7 +103,7 @@ export function Blueprint() {
         <table className="tbl"><thead><tr><th>문서</th><th>결재 순서</th></tr></thead><tbody>
           <tr><td>물류 요청</td><td>매장관리자 → 점주 → 물류관리자 → 총괄</td></tr>
           <tr><td>손실·결손·내부사용</td><td>매장관리자 → 점주 → 총괄</td></tr>
-          <tr><td>급여 확정</td><td>인적관리자 → 점주 → 총괄</td></tr>
+          <tr><td>급여 확정</td><td>인사관리자 → 점주 → 총괄</td></tr>
           <tr><td>비용</td><td>매장관리자 → 점주 → 총괄</td></tr>
         </tbody></table>
         <p className="muted small">요청자 본인 단계는 자동 통과. 총괄이 [설정 › 결재선]에서 매장·금액별로 줄이거나 승인자를 지정할 수 있습니다.</p>

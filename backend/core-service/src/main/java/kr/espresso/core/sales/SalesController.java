@@ -43,6 +43,46 @@ public class SalesController {
                 .param("st", st).param("from", ym.atDay(1)).param("to", ym.atEndOfMonth()).query().listOfRows();
     }
 
+    /**
+     * 매출 추이: 최근 12개월 월별 순매출(공급가: 과세+면세−할인−환불)과 1년 전 같은 달 순매출.
+     * storeId 가 없으면 볼 수 있는 매장 합산 (본사·베이커리 제외)
+     */
+    @GetMapping("/trend")
+    public Map<String, Object> trend(@RequestParam(required = false) UUID storeId, @RequestParam(required = false) String to) {
+        CurrentUser u = CurrentUser.get();
+        String[] roles = {Roles.HQ_ADMIN, Roles.OWNER, Roles.STORE_MGR, Roles.LOGISTICS_MGR, Roles.HR_MGR};
+        Set<UUID> st;
+        if (storeId != null) { scope.requireRoleOn(u, storeId, roles); st = Set.of(storeId); }
+        else st = scope.allowed(u, List.of(roles));
+        YearMonth end = to == null || to.isBlank() ? YearMonth.now(java.time.ZoneId.of("Asia/Seoul")) : YearMonth.parse(to);
+        YearMonth start = end.minusMonths(23);
+        Map<String, Long> byMonth = new HashMap<>(), cust = new HashMap<>();
+        if (!st.isEmpty())
+            for (var r : db.sql("""
+                    select to_char(d.sales_date, 'YYYY-MM') m, sum(d.gross_supply + d.exempt_supply - d.discount_amount - d.refund_amount) net, sum(coalesce(d.customer_count,0)) c
+                    from sales.daily_sales d join store.store s on s.id = d.store_id
+                    where d.store_id in (:st) and s.site_type = 'STORE' and d.sales_date between :f and :t group by 1""")
+                    .param("st", st).param("f", start.atDay(1)).param("t", end.atEndOfMonth()).query().listOfRows()) {
+                byMonth.put((String) r.get("m"), ((Number) r.get("net")).longValue());
+                cust.put((String) r.get("m"), ((Number) r.get("c")).longValue());
+            }
+        List<Map<String, Object>> months = new ArrayList<>();
+        long cur = 0, prev = 0;
+        for (int i = 11; i >= 0; i--) {
+            YearMonth ym = end.minusMonths(i);
+            String k = ym.toString(), pk = ym.minusYears(1).toString();
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("month", k); m.put("net_sales", byMonth.get(k)); m.put("prev_year", byMonth.get(pk));
+            m.put("customers", cust.get(k));
+            cur += byMonth.getOrDefault(k, 0L); prev += byMonth.getOrDefault(pk, 0L);
+            months.add(m);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("months", months); out.put("total", cur); out.put("prev_total", prev);
+        out.put("growth", prev == 0 ? null : Math.round((cur - prev) * 1000.0 / prev) / 10.0);
+        return out;
+    }
+
     @PutMapping("/{storeId}/{date}")
     public Map<String, Object> upsert(@PathVariable UUID storeId, @PathVariable String date, @RequestBody SalesService.DayReq req) {
         return Map.of("id", svc.upsert(storeId, LocalDate.parse(date), req, "MANUAL", null, CurrentUser.get()));

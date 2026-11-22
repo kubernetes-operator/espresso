@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Empty, Modal, Toast } from '../components/ui'
 import { useSession } from '../session'
-import { won, dt, DIVISIONS } from '../format'
+import { won, dt, DIVISIONS, num } from '../format'
 
 const DIV = DIVISIONS
-const REASON: Record<string, string> = { RECEIPT: '입고', SALE: '판매', LOSS: '손실', SHORTAGE: '결손', INTERNAL_USE: '내부사용', COUNT_ADJ: '실사 조정', TRANSFER_IN: '이동 입고', TRANSFER_OUT: '이동 출고', OPENING: '기초' }
+const REASON: Record<string, string> = { HQ_RECEIPT: '본사 입고', RECEIPT: '입고', SALE: '판매', LOSS: '손실', SHORTAGE: '결손', INTERNAL_USE: '내부사용', COUNT_ADJ: '실사 조정', TRANSFER_IN: '이동 입고', TRANSFER_OUT: '이동 출고', OPENING: '기초' }
 
 export function Inventory() {
   const s = useSession()
@@ -16,6 +16,8 @@ export function Inventory() {
   const [division, setDivision] = useState('')
   const [q, setQ] = useState('')
   const [ledger, setLedger] = useState<any>(null)
+  const [hqIn, setHqIn] = useState(false)
+  const isHq = s.currentStore?.site_type === 'HQ'
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const rows = useMemo(() => (list.data ?? []).filter(r => (!division || r.division_code === division) && (!q || r.item_name.includes(q))), [list.data, division, q])
@@ -35,10 +37,11 @@ export function Inventory() {
     }
   }
   return (
-    <Page title="재고" sub={`${s.currentStore?.name ?? '전체 매장 합산'} · 이동평균 단가(공급가) 기준`}
+    <Page title={isHq ? '재고 · 본사 창고' : '재고'} sub={isHq ? '본사 창고 · 매장 발송 시 자동 차감 · 수량이 음수면 본사 입고로 맞추세요' : `${s.currentStore?.name ?? '전체 합산'} · 이동평균 단가(공급가) 기준`}
       actions={<>
+        {isHq && s.has('HQ_ADMIN', 'LOGISTICS_MGR') && <button className="primary" onClick={() => setHqIn(true)}>본사 입고</button>}
         {canCount && <button onClick={startCount}>재고 실사</button>}
-        <button className="primary" onClick={() => nav('/adjustments/new')}>손실·결손 등록</button>
+        {!isHq && <button className="primary" onClick={() => nav('/adjustments/new')}>손실·결손 등록</button>}
       </>}>
       <ErrorBox error={list.error || err} />
       <div className="grid3">
@@ -56,7 +59,7 @@ export function Inventory() {
             {rows.map(r => (
               <tr key={r.store_id + r.item_id}>
                 {!single && <td>{r.store_name}</td>}
-                <td>{r.item_name} {r.low && <Badge tone="warn">부족</Badge>}</td>
+                <td>{r.item_name} {r.low && <Badge tone="warn">부족</Badge>} {Number(r.qty) < 0 && <Badge tone="bad">음수</Badge>}</td>
                 <td><small>{DIV[r.division_code]} · {r.category_name}</small></td>
                 <td className="num">{Number(r.qty)} {r.unit}</td>
                 <td className="num">{won(r.avg_cost)}</td>
@@ -74,6 +77,7 @@ export function Inventory() {
         {rows.length === 0 && <Empty>재고가 없습니다. 물류 수령 검수를 하면 입고됩니다.</Empty>}
       </div>
       {ledger && <LedgerModal row={ledger} onClose={() => setLedger(null)} />}
+      {hqIn && <HqReceiptModal onClose={() => setHqIn(false)} onDone={(n: number) => { setHqIn(false); setMsg(`본사 입고 ${n}건을 반영했습니다`); list.reload() }} />}
       <Toast msg={msg} onDone={() => setMsg(null)} />
     </Page>
   )
@@ -91,6 +95,45 @@ function LedgerModal({ row, onClose }: any) {
               <td className="num">{Number(x.qty_delta) > 0 ? '+' : ''}{Number(x.qty_delta)}</td><td className="num">{won(x.unit_cost)}</td>
               <td className="num">{won(x.amount)}</td><td className="num">{Number(x.balance_qty)}</td></tr>))}</tbody>
         </table>
+      </div>
+    </Modal>
+  )
+}
+
+/** 본사 창고 입고 (공급처 매입) */
+function HqReceiptModal({ onClose, onDone }: any) {
+  const items = useApi<any[]>('/api/core/catalog/items')
+  const [lines, setLines] = useState<{ itemId: string; qty: string; unitCost: string }[]>([{ itemId: '', qty: '', unitCost: '' }])
+  const [memo, setMemo] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const stockable = (items.data ?? []).filter(i => !i.is_asset)
+  const set = (i: number, k: string, v: string) => setLines(lines.map((l, j) => {
+    if (j !== i) return l
+    const n = { ...l, [k]: v }
+    if (k === 'itemId') { const it = stockable.find(x => x.id === v); n.unitCost = it?.hq_cost != null ? String(it.hq_cost) : '' }
+    return n
+  }))
+  const save = async () => {
+    setErr(null)
+    const ls = lines.filter(l => l.itemId && Number(l.qty) > 0)
+    try { await api('/api/core/inventory/hq-receipts', { body: { memo, lines: ls.map(l => ({ itemId: l.itemId, qty: Number(l.qty), unitCost: l.unitCost ? Number(l.unitCost) : null })) } }); onDone(ls.length) }
+    catch (e: any) { setErr(e.message) }
+  }
+  return (
+    <Modal title="본사 입고" onClose={onClose} wide>
+      <div className="form">
+        <p className="muted small">공급처에서 사 온 물품을 본사 창고에 넣습니다. 단가는 본사 매입가가 기본으로 들어갑니다(VAT 제외).</p>
+        {lines.map((l, i) => (
+          <div key={i} className="row">
+            <div><label htmlFor={`hq-it-${i}`}>품목</label><select id={`hq-it-${i}`} value={l.itemId} onChange={e => set(i, 'itemId', e.target.value)}>
+              <option value="">선택</option>{stockable.map(x => <option key={x.id} value={x.id}>{x.sku} · {x.name}</option>)}</select></div>
+            <div><label htmlFor={`hq-q-${i}`}>수량</label><input id={`hq-q-${i}`} inputMode="decimal" value={l.qty} onChange={e => set(i, 'qty', e.target.value)} /></div>
+            <div><label htmlFor={`hq-c-${i}`}>단가 (원)</label><input id={`hq-c-${i}`} inputMode="numeric" value={num(l.unitCost)} onChange={e => set(i, 'unitCost', e.target.value.replace(/\D/g, ''))} /></div>
+          </div>))}
+        <button type="button" className="ghost small" onClick={() => setLines([...lines, { itemId: '', qty: '', unitCost: '' }])}>+ 품목</button>
+        <label htmlFor="hq-memo">메모</label><input id="hq-memo" value={memo} placeholder="예: 11월 원두 입고 (공급처)" onChange={e => setMemo(e.target.value)} />
+        {err && <div className="error-box">{err}</div>}
+        <button className="primary" disabled={!lines.some(l => l.itemId && Number(l.qty) > 0)} onClick={save}>입고</button>
       </div>
     </Modal>
   )

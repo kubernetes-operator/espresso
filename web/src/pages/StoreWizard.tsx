@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
+import { checkRequired } from '../components/enhance'
 import { useApi, Page, Badge, ErrorBox, Toast } from '../components/ui'
 import { useSession } from '../session'
-import { won } from '../format'
+import { won, num as comma } from '../format'
 
 const STEPS = ['기본정보', '부가세·결산·로열티', '임대', '설비·투자', '초도 물류·단가', '인원', '결재선', '검토']
 const GUIDE: Record<number, { tip: string; check: string[] }> = {
@@ -12,7 +13,7 @@ const GUIDE: Record<number, { tip: string; check: string[] }> = {
   3: { tip: '임대 계약을 넣으면 매달 [비용 › 월세·관리비 생성]으로 자동 생성되고, 보증금은 투자금에 합산됩니다.', check: ['임대차 계약서', '월세 부가세 여부'] },
   4: { tip: '가구·냉장고·냉동고·커피머신 같은 설비는 자산으로 등록되어 매월 감가상각됩니다. 모든 항목은 매장 투자 총액에 합산됩니다.', check: ['인테리어 견적·정산', '설비 구매 증빙'] },
   5: { tip: '기본 초도 패키지를 불러와 수량을 조정하세요. 완료하면 초도 물류 요청이 자동 생성되어 물류 처리 보드로 넘어갑니다. 매장 전용 단가·할인도 여기서 정합니다.', check: ['오픈 메뉴 확정', '보관 공간(냉장·냉동) 확인'] },
-  6: { tip: '점주는 매장관리자의 상위입니다. 물류·인적 관리자는 이 매장을 담당할 사람만 고르세요(전 매장 담당자는 자동 포함).', check: ['점주 계정 생성', '매장관리자 계정 생성'] },
+  6: { tip: '점주는 매장관리자의 상위입니다. 물류·인사 관리자는 이 매장을 담당할 사람만 고르세요(전 매장 담당자는 자동 포함).', check: ['점주 계정 생성', '매장관리자 계정 생성'] },
   7: { tip: '비워 두면 문서별 기본 결재선(전체 결재)을 따릅니다. 이 매장만 다르게 하려면 단계를 넣으세요.', check: [] },
   8: { tip: '완료하면 위 내용이 한 번에 반영되고 매장 상태가 "운영"으로 바뀝니다.', check: [] },
 }
@@ -21,7 +22,7 @@ export function StoreWizardStart() {
   const nav = useNavigate()
   const regions = useApi<any[]>('/api/core/regions')
   const list = useApi<any[]>('/api/core/onboarding')
-  const [f, setF] = useState({ code: '', name: '', regionId: '', businessType: 'FRANCHISE' })
+  const [f, setF] = useState({ code: '', name: '', regionId: '', businessType: 'FRANCHISE', siteType: 'STORE' })
   const [err, setErr] = useState<string | null>(null)
   const start = async () => { setErr(null); try { const r: any = await api('/api/core/onboarding', { body: { ...f, regionId: f.regionId || null } }); nav(`/admin/stores/wizard/${r.storeId}`) } catch (e: any) { setErr(e.message) } }
   return (
@@ -29,13 +30,14 @@ export function StoreWizardStart() {
       <section className="card form">
         <h2>새 매장 시작</h2>
         <div className="row">
-          <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
-          <div><label htmlFor="sw-name">매장명</label><input id="sw-name" value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
-          <div><label htmlFor="sw-region">권역</label><select id="sw-region" value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+          <div><label htmlFor="sw-code">매장 코드</label><input id="sw-code" required value={f.code} onChange={e => setF({ ...f, code: e.target.value.toUpperCase() })} placeholder="예: SS01" /></div>
+          <div><label htmlFor="sw-name">매장명</label><input id="sw-name" required value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="예: 성수점" /></div>
+          <div><label htmlFor="sw-region">권역</label><select id="sw-region" required value={f.regionId} onChange={e => setF({ ...f, regionId: e.target.value })}><option value="">선택</option>{(regions.data ?? []).map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+          <div><label htmlFor="sw-site">구분</label><select id="sw-site" value={f.siteType} onChange={e => setF({ ...f, siteType: e.target.value })}><option value="STORE">매장</option><option value="BAKERY">베이커리</option></select></div>
           <div><label htmlFor="sw-type">형태</label><select id="sw-type" value={f.businessType} onChange={e => setF({ ...f, businessType: e.target.value })}><option value="FRANCHISE">가맹</option><option value="DIRECT">직영</option></select></div>
         </div>
         {err && <div className="error-box">{err}</div>}
-        <button className="primary" disabled={!f.code || !f.name} onClick={start}>시작</button>
+        <button className="primary" onClick={e => { const b = (e.target as HTMLElement).closest('.card, .form, div'); if (b && checkRequired((b.parentElement ?? b) as HTMLElement).length) return; start() }}>시작</button>
       </section>
       {(list.data ?? []).length > 0 && <section className="card table-wrap"><h2>진행 이력</h2>
         <table className="tbl"><thead><tr><th>매장</th><th>단계</th><th>상태</th><th></th></tr></thead>
@@ -133,7 +135,7 @@ function Step2({ v, set }: any) {
     </div>
     <div className="row">
       {['RATE', 'RATE_PLUS_FIXED'].includes(type) && <F id="w2-rate" label="요율 (%)"><input id="w2-rate" inputMode="decimal" value={v.royaltyRatePct ?? ''} onChange={e => set({ royaltyRatePct: e.target.value, royaltyRate: e.target.value ? String(Number(e.target.value) / 100) : null })} /></F>}
-      {['FIXED', 'RATE_PLUS_FIXED'].includes(type) && <F id="w2-fixed" label="정액 (원/월)"><input id="w2-fixed" inputMode="numeric" value={v.royaltyFixed ?? ''} onChange={e => set({ royaltyFixed: num(e.target.value) })} /></F>}
+      {['FIXED', 'RATE_PLUS_FIXED'].includes(type) && <F id="w2-fixed" label="정액 (원/월)"><input id="w2-fixed" inputMode="numeric" value={comma(v.royaltyFixed ?? '')} onChange={e => set({ royaltyFixed: num(e.target.value) })} /></F>}
     </div>
     <div className="chips">
       <label className="switch"><input type="checkbox" checked={v.fivePlus ?? true} onChange={e => set({ fivePlus: e.target.checked })} /><span>5인 이상 사업장 (연장·야간·휴일 가산)</span></label>
@@ -145,9 +147,9 @@ function Step3({ v, set }: any) {
   return (<>
     <F id="w3-lessor" label="임대인"><input id="w3-lessor" value={v.lessorName ?? ''} onChange={e => set({ lessorName: e.target.value })} /></F>
     <div className="row">
-      <F id="w3-dep" label="보증금"><input id="w3-dep" inputMode="numeric" value={v.deposit ?? ''} onChange={e => set({ deposit: num(e.target.value) })} /></F>
-      <F id="w3-rent" label="월세 (공급가)"><input id="w3-rent" inputMode="numeric" value={v.monthlyRent ?? ''} onChange={e => set({ monthlyRent: num(e.target.value) })} /></F>
-      <F id="w3-fee" label="관리비"><input id="w3-fee" inputMode="numeric" value={v.maintenanceFee ?? ''} onChange={e => set({ maintenanceFee: num(e.target.value) })} /></F>
+      <F id="w3-dep" label="보증금"><input id="w3-dep" inputMode="numeric" value={comma(v.deposit ?? '')} onChange={e => set({ deposit: num(e.target.value) })} /></F>
+      <F id="w3-rent" label="월세 (공급가)"><input id="w3-rent" inputMode="numeric" value={comma(v.monthlyRent ?? '')} onChange={e => set({ monthlyRent: num(e.target.value) })} /></F>
+      <F id="w3-fee" label="관리비"><input id="w3-fee" inputMode="numeric" value={comma(v.maintenanceFee ?? '')} onChange={e => set({ maintenanceFee: num(e.target.value) })} /></F>
       <F id="w3-day" label="납부일"><input id="w3-day" inputMode="numeric" value={v.paymentDay ?? '25'} onChange={e => set({ paymentDay: num(e.target.value) })} /></F>
     </div>
     <div className="row">
@@ -165,7 +167,7 @@ function Step4({ v, set }: any) {
     {items.map((x, i) => <div key={i} className="step-edit">
       <select aria-label="구분" value={x.category} onChange={e => up(i, { category: e.target.value, asset: e.target.value === 'EQUIPMENT' })}>{Object.entries(ICAT).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
       <input aria-label="내용" value={x.description} onChange={e => up(i, { description: e.target.value })} />
-      <input aria-label="금액" inputMode="numeric" value={x.amount} placeholder="금액" onChange={e => up(i, { amount: num(e.target.value) })} style={{ width: 140 }} />
+      <input aria-label="금액" inputMode="numeric" value={comma(x.amount)} placeholder="금액" onChange={e => up(i, { amount: num(e.target.value) })} style={{ width: 140 }} />
       <button type="button" className="ghost small" onClick={() => set({ items: items.filter((_, j) => j !== i) })}>✕</button></div>)}
     <button type="button" onClick={() => set({ items: [...items, { category: 'OTHER', description: '', amount: '' }] })}>+ 항목</button>
     <p className="small">합계 <b>{won(total)}</b>원 (임대 보증금은 3단계 값이 자동 합산)</p>
@@ -211,11 +213,11 @@ function Step6({ v, set }: any) {
   return (<>
     <p className="muted small">계정이 없으면 먼저 [설정 › 계정·등급]에서 만드세요. 등급이 없는 새 계정도 목록에 나옵니다.</p>
     {pick('ownerIds', '점주', ['OWNER'])}{pick('managerIds', '매장 관리자', ['STORE_MGR'])}{pick('staffIds', '일반 사원', ['STAFF'])}
-    {pick('logisticsIds', '담당 물류 관리자 (매장 지정)', ['LOGISTICS_MGR'])}{pick('hrIds', '담당 인적 관리자 (매장 지정)', ['HR_MGR'])}
+    {pick('logisticsIds', '담당 물류 관리자 (매장 지정)', ['LOGISTICS_MGR'])}{pick('hrIds', '담당 인사 관리자 (매장 지정)', ['HR_MGR'])}
   </>)
 }
 const DOCS: Record<string, string> = { LOGISTICS_REQUEST: '물류 요청', STOCK_ADJUSTMENT: '손실·결손·사용', PAYROLL_RUN: '급여 확정', EXPENSE: '비용' }
-const ROLES: Record<string, string> = { STORE_MGR: '매장 관리자', OWNER: '점주', LOGISTICS_MGR: '물류 관리자', HR_MGR: '인적 관리자', HQ_ADMIN: '총괄 관리자' }
+const ROLES: Record<string, string> = { STORE_MGR: '매장 관리자', OWNER: '점주', LOGISTICS_MGR: '물류 관리자', HR_MGR: '인사 관리자', HQ_ADMIN: '총괄 관리자' }
 function Step7({ v, set }: any) {
   const lines: any[] = v.lines ?? []
   const lineOf = (dt: string) => lines.find(l => l.docType === dt)

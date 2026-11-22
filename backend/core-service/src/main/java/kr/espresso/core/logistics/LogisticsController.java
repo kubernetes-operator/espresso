@@ -35,7 +35,7 @@ public class LogisticsController {
         return db.sql("""
                 select r.id, r.request_no, r.store_id, s.name as store_name, r.title, r.status, r.taxable_supply, r.exempt_supply,
                        r.vat_amount, r.shipping_fee, r.total_amount, r.requested_at, r.approved_at, r.shipped_at, r.completed_at,
-                       r.created_at, r.created_by, r.desired_date, r.is_initial_order,
+                       r.created_at, r.created_by, r.desired_date, r.due_date, r.kind, r.is_initial_order, r.delivered_at, r.received_at, r.closed_at,
                        (select count(*) from logistics.request_line l where l.request_id = r.id) as line_count,
                        (select count(*) from logistics.request_line l where l.request_id = r.id and l.source_type = 'EXTERNAL') as external_count
                 from logistics.request r join store.store s on s.id = r.store_id
@@ -56,6 +56,8 @@ public class LogisticsController {
                 select l.*, c.name as category_name, c.division_code from logistics.request_line l
                 join catalog.category c on c.id = l.category_id where l.request_id = ? order by l.line_no""").param(id).query().listOfRows());
         r.put("shipments", db.sql("select * from logistics.shipment where request_id = ? order by shipped_at").param(id).query().listOfRows());
+        r.put("related", db.sql("select id, request_no, kind, status from logistics.request where parent_request_id = ? or id = ? order by created_at")
+                .params(id, r.get("parent_request_id")).query().listOfRows());
         r.put("approval", approvals.forDoc(LogisticsService.DOC, id));
         r.put("history", trail.history(LogisticsService.DOC, id));
         return r;
@@ -96,6 +98,12 @@ public class LogisticsController {
     public Map<String, Object> receive(@PathVariable UUID id, @RequestBody LogisticsService.ReceiveReq req) {
         return svc.receive(id, req, CurrentUser.get());
     }
+
+    @PostMapping("/{id}/close")
+    public Map<String, Object> close(@PathVariable UUID id, @RequestBody(required = false) LogisticsService.CloseReq req) { svc.confirmClose(id, req, CurrentUser.get()); return Map.of("ok", true); }
+
+    @PutMapping("/{id}/due-date")
+    public Map<String, Object> due(@PathVariable UUID id, @RequestBody LogisticsService.DueReq req) { svc.setDue(id, req, CurrentUser.get()); return Map.of("ok", true); }
 
     @PostMapping("/{id}/cancel")
     public Map<String, Object> cancel(@PathVariable UUID id) { svc.cancel(id, CurrentUser.get()); return Map.of("ok", true); }

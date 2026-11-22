@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import { api } from '../api'
+import { prepareUpload, fmtSize, UPLOAD_LIMIT } from '../upload'
 import { useApi, Page, Badge, ErrorBox, Modal, Toast, Empty } from '../components/ui'
 import { useSession } from '../session'
-import { won } from '../format'
+import { won, num } from '../format'
 
 const thisMonth = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7)
 
@@ -32,6 +33,7 @@ export function Sales() {
       </>}>
       <ErrorBox error={list.error || err} />
       {!storeId && <div className="note warn">입력은 상단에서 매장을 하나 고른 뒤 할 수 있습니다.</div>}
+      {storeId && <p className="muted small">직원들이 근무 마감에서 입력한 금액은 <a href="/closing">근무 마감</a> 화면의 소계로 모이고, 거기서 [일 매출로 반영]하면 이 표에 들어옵니다.</p>}
       <div className="grid3">
         <div className="card stat"><small>순매출 ({inc ? 'VAT 포함' : 'VAT 별도'})</small><b className="tnum">{won(inc ? sum.total : sum.supply)}원</b><span className="muted small">{rows.length}일</span></div>
         <div className="card stat"><small>일평균</small><b className="tnum">{won(rows.length ? (inc ? sum.total : sum.supply) / new Set(rows.map(r => r.sales_date)).size : 0)}원</b></div>
@@ -87,11 +89,11 @@ function SalesModal({ storeId, row, onClose, onDone }: any) {
     } catch (e: any) { setErr(e.message) }
   }
   const field = (k: string, label: string) => (
-    <div><label htmlFor={`sm-${k}`}>{label}</label><input id={`sm-${k}`} inputMode="numeric" value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>)
+    <div><label htmlFor={`sm-${k}`}>{label}</label><input id={`sm-${k}`} inputMode="numeric" value={num(f[k])} onChange={e => setF({ ...f, [k]: e.target.value.replace(/\D/g, '') })} /></div>)
   return (
     <Modal title="일 매출 입력" onClose={onClose}>
       <form className="form" onSubmit={e => { e.preventDefault(); save(false) }}>
-        <label htmlFor="sm-date">일자</label><input id="sm-date" type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} />
+        <label htmlFor="sm-date">일자</label><input id="sm-date" required type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} />
         <div className="row">{field('beverage', '음료')}{field('dessert', '디저트')}{field('tableware', '식기·포장')}{field('etc', '기타')}</div>
         <div className="row">{field('discount', '할인')}{field('refund', '환불')}</div>
         <div className="row">{field('cash', '현금')}{field('card', '카드 (비우면 나머지)')}{field('customers', '고객 수')}</div>
@@ -110,8 +112,8 @@ function UploadModal({ storeId, onClose, onDone }: any) {
   const [err, setErr] = useState<string | null>(null)
   const go = async () => {
     if (!file) return
-    const fd = new FormData(); fd.append('file', file)
-    try { const r: any = await api(`/api/core/sales/${storeId}/upload?close=${close}`, { body: fd }); setRes(r); if (!r.errors.length) onDone(`${r.applied}일 매출을 반영했습니다`) }
+    setErr(null)
+    try { const fd = new FormData(); fd.append('file', await prepareUpload(file)); const r: any = await api(`/api/core/sales/${storeId}/upload?close=${close}`, { body: fd }); setRes(r); if (!r.errors.length) onDone(`${r.applied}일 매출을 반영했습니다`) }
     catch (e: any) { setErr(e.message) }
   }
   const tpl = async () => {
@@ -121,7 +123,7 @@ function UploadModal({ storeId, onClose, onDone }: any) {
   return (
     <Modal title="매출 엑셀 업로드" onClose={onClose}>
       <div className="form">
-        <p className="small">열 순서: 일자, 음료, 디저트, 식기·포장, 기타, 면세, 할인, 환불, 카드, 현금, 기타결제, 고객수 (금액은 VAT 포함). .xlsx 또는 .csv · 머리글 행이 있으면 열 이름으로 읽습니다(식기·포장 열이 없는 예전 양식도 가능)</p>
+        <p className="small">열 순서: 일자, 음료, 디저트, 식기·포장, 기타, 면세, 할인, 환불, 카드, 현금, 기타결제, 고객수 (금액은 VAT 포함). .xlsx 또는 .csv · 머리글 행이 있으면 열 이름으로 읽습니다(식기·포장 열이 없는 예전 양식도 가능) · 파일당 최대 {fmtSize(UPLOAD_LIMIT)} (넘으면 기간을 나눠 올리기)</p>
         <button type="button" onClick={tpl}>양식 내려받기 (CSV)</button>
         <input id="up-file" type="file" accept=".xlsx,.xls,.csv" aria-label="파일" onChange={e => setFile(e.target.files?.[0] ?? null)} />
         <label className="switch"><input type="checkbox" checked={close} onChange={e => setClose(e.target.checked)} /><span>올리면서 바로 마감</span></label>

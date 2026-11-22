@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { useApi, Page, Badge, ErrorBox, Toast, Modal } from '../components/ui'
-import { won, ROLE_NAMES } from '../format'
+import { won, ROLE_NAMES, num } from '../format'
 import { useNames } from '../components/directory'
 
 const DOCS: Record<string, string> = { LOGISTICS_REQUEST: '물류 요청', STOCK_ADJUSTMENT: '손실·결손·내부사용', PAYROLL_RUN: '급여 확정', EXPENSE: '비용' }
@@ -74,8 +74,8 @@ function LineModal({ line, stores, users, onClose, onDone }: any) {
           <div><label htmlFor="al-store">적용 매장</label><select id="al-store" value={storeId} disabled={!isNew} onChange={e => setStoreId(e.target.value)}><option value="">전 매장</option>{stores.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
         </div>
         {!line.is_default && <div className="row">
-          <div><label htmlFor="al-min">금액 이상 (원)</label><input id="al-min" inputMode="numeric" value={min} onChange={e => setMin(e.target.value.replace(/\D/g, ''))} /></div>
-          <div><label htmlFor="al-max">금액 미만 (원)</label><input id="al-max" inputMode="numeric" value={max} onChange={e => setMax(e.target.value.replace(/\D/g, ''))} /></div>
+          <div><label htmlFor="al-min">금액 이상 (원)</label><input id="al-min" inputMode="numeric" value={num(min)} onChange={e => setMin(e.target.value.replace(/\D/g, ''))} /></div>
+          <div><label htmlFor="al-max">금액 미만 (원)</label><input id="al-max" inputMode="numeric" value={num(max)} onChange={e => setMax(e.target.value.replace(/\D/g, ''))} /></div>
         </div>}
         <label>결재 순서</label>
         {steps.map((st, i) => (

@@ -16,11 +16,15 @@ import java.util.*;
  *  - 월급: 월급 + 연장·야간 가산(통상시급 = 월급/209)
  *  - 공제: 국민연금·건강·장기요양·고용 + 소득세(간이세액표, 미등록 시 추정)·지방소득세 / 사업소득 3.3%
  *  - 사업자 부담: 4대보험 사업자분 + 산재 / 퇴직급여 충당금 = 지급액/12 (주 15시간 이상)
+ *  - 연봉 등급(salary_grade)이 있으면 월급 = 현재 연봉 테이블 금액 / 12
+ *  - 상여금(BONUS): 과세 지급 / 퇴직금(SEVERANCE): 지급하되 4대보험·근로소득세 대상에서 제외 (퇴직소득세는 별도 신고)
+ *  - 비과세: 식대(한도) + 기타 비과세 항목(contract.non_taxable_allowances.etc)
  */
 @Component
 public class PayrollCalculator {
     private final JdbcClient db;
-    public PayrollCalculator(JdbcClient db) { this.db = db; }
+    private final com.fasterxml.jackson.databind.ObjectMapper om;
+    public PayrollCalculator(JdbcClient db, com.fasterxml.jackson.databind.ObjectMapper om) { this.db = db; this.om = om; }
 
     public record Item(String kind, String code, String name, long amount, Map<String, Object> basis) {}
     public record Result(long gross, long taxable, long deduction, long net, long employer, long severance, int workedMinutes,
@@ -37,11 +41,20 @@ public class PayrollCalculator {
     static Long lim(Map<String, Object[]> r, String k, int i) { var x = r.get(k); return x == null || x[i] == null ? null : ((Number) x[i]).longValue(); }
 
     public Result calc(Map<String, Object> contract, List<Map<String, Object>> work, YearMonth ym, boolean fivePlus) {
+        return calc(contract, work, ym, fivePlus, Map.of());
+    }
+
+    public Result calc(Map<String, Object> contract, List<Map<String, Object>> work, YearMonth ym, boolean fivePlus, Map<String, Long> extras) {
         var r = rates(ym.getYear());
         List<Item> items = new ArrayList<>();
         String type = (String) contract.get("employment_type");
         String payType = (String) contract.get("pay_type");
         long wage = ((Number) contract.get("base_wage")).longValue();
+        String grade = (String) contract.get("salary_grade");
+        if (grade != null) {
+            Long annual = db.sql("select annual_salary from hr.salary_grade where code = ?").param(grade).query(Long.class).optional().orElse(null);
+            if (annual != null) { wage = annual / 12; payType = "MONTHLY"; }
+        }
         double weeklyHours = ((BigDecimal) contract.get("weekly_contract_hours")).doubleValue();
         int reg = 0, ot = 0, night = 0, hol = 0;
         Map<LocalDate, Integer> weekMin = new TreeMap<>();
@@ -68,23 +81,35 @@ public class PayrollCalculator {
             }
         } else {
             base = wage;
-            items.add(new Item("EARNING", "BASE", "기본급(월급)", base, Map.of("monthly", wage)));
+            items.add(new Item("EARNING", "BASE", grade != null ? "기본급(연봉 " + grade + ")" : "기본급(월급)", base,
+                    grade != null ? Map.of("monthly", wage, "grade", grade) : Map.of("monthly", wage)));
         }
         double otMult = fivePlus ? v(r, "OVERTIME_MULT", 1.5) : 1.0;
         if (ot > 0) items.add(new Item("EARNING", "OVERTIME", "연장근로수당", Math.round(hourly * otMult * ot / 60.0), Map.of("hours", ot / 60.0, "mult", otMult)));
         if (night > 0 && fivePlus) items.add(new Item("EARNING", "NIGHT", "야간근로가산", Math.round(hourly * v(r, "NIGHT_PREMIUM", 0.5) * night / 60.0), Map.of("hours", night / 60.0)));
         if (hol > 0) items.add(new Item("EARNING", "HOLIDAY", "휴일근로수당", Math.round(hourly * (fivePlus ? v(r, "HOLIDAY_MULT", 1.5) : 1.0) * hol / 60.0), Map.of("hours", hol / 60.0)));
-        long meal = 0;
-        Object na = contract.get("non_taxable_allowances");
-        if (na != null && na.toString().contains("meal")) {
-            meal = Math.min(Long.parseLong(na.toString().replaceAll("[^0-9]", "").isEmpty() ? "0" : na.toString().replaceAll("[^0-9]", "")), (long) v(r, "MEAL_NONTAX", 200000));
+        long bonus = extras.getOrDefault("BONUS", 0L), severance = extras.getOrDefault("SEVERANCE", 0L);
+        if (bonus > 0) items.add(new Item("EARNING", "BONUS", "상여금", bonus, Map.of()));
+        long meal = 0, otherNontax = 0;
+        com.fasterxml.jackson.databind.JsonNode na = null;
+        try { Object raw = contract.get("non_taxable_allowances"); if (raw != null) na = om.readTree(raw.toString()); } catch (Exception ignore) { }
+        if (na != null) {
+            meal = Math.min(na.path("meal").asLong(0), (long) v(r, "MEAL_NONTAX", 200000));
             if (meal > 0) items.add(new Item("EARNING", "MEAL", "식대(비과세)", meal, Map.of()));
+            int k = 1;
+            for (var x : na.path("etc")) {
+                long amt = x.path("amount").asLong(0);
+                if (amt <= 0) continue;
+                items.add(new Item("EARNING", "NONTAX_" + k++, x.path("name").asText("기타") + "(비과세)", amt, Map.of()));
+                otherNontax += amt;
+            }
         }
+        if (severance > 0) items.add(new Item("EARNING", "SEVERANCE", "퇴직금", severance, Map.of("note", "퇴직소득 — 4대보험·근로소득세 제외")));
         long gross = items.stream().filter(i -> i.kind().equals("EARNING")).mapToLong(Item::amount).sum();
-        long taxable = gross - meal;
+        long taxable = gross - meal - otherNontax - severance;
         long emp = 0, ded = 0; boolean est = false;
         if ("FREELANCER".equals(type) || "BIZ_3_3".equals(contract.get("income_tax_type"))) {
-            long t = (long) Math.floor(gross * v(r, "BIZ_TAX", 0.03) / 10) * 10;
+            long t = (long) Math.floor((gross - severance) * v(r, "BIZ_TAX", 0.03) / 10) * 10;
             long lt = (long) Math.floor(t * v(r, "LOCAL_TAX", 0.1) / 10) * 10;
             items.add(new Item("DEDUCTION", "BIZ_TAX", "사업소득세 3%", t, Map.of()));
             items.add(new Item("DEDUCTION", "LOCAL_TAX", "지방소득세 0.3%", lt, Map.of()));
@@ -119,10 +144,10 @@ public class PayrollCalculator {
             items.add(new Item("DEDUCTION", "LOCAL_TAX", "지방소득세", lt, Map.of()));
             ded += it + lt;
         }
-        long ia = trunc10(gross * v(r, "IA_EMPLOYER", 0));
+        long ia = trunc10((gross - severance) * v(r, "IA_EMPLOYER", 0));
         items.add(new Item("EMPLOYER", "IA_ER", "산재보험(사업자)", ia, Map.of()));
         emp += ia;
-        long sev = weeklyHours >= 15 && !"FREELANCER".equals(type) ? gross / 12 : 0;
+        long sev = weeklyHours >= 15 && !"FREELANCER".equals(type) ? (gross - severance) / 12 : 0;
         if ("HOURLY".equals(payType) && wage < minWage) items.add(new Item("EMPLOYER", "WARN_MIN_WAGE", "최저임금 미달 경고", 0, Map.of("minWage", minWage)));
         String category = "PART_TIME".equals(type) || "FREELANCER".equals(type) ? "PART_TIME" : "REGULAR";
         return new Result(gross, taxable, ded, gross - ded, emp, sev, reg + ot, items, category, est);

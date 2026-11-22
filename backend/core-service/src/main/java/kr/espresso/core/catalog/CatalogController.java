@@ -29,7 +29,7 @@ public class CatalogController {
     public List<Map<String, Object>> categories() {
         CurrentUser.get();
         return db.sql("""
-                select c.id, c.code, c.name, c.division_code, d.name as division_name, c.is_asset, c.asset_threshold, c.is_active, c.parent_id
+                select c.id, c.code, c.name, c.division_code, d.name as division_name, c.is_asset, c.asset_threshold, c.is_active, c.parent_id, c.sku_prefix
                 from catalog.category c join catalog.division d on d.code = c.division_code
                 order by d.sort_order, c.sort_order""").query().listOfRows();
     }
@@ -48,6 +48,38 @@ public class CatalogController {
         return Map.of("ok", true, "items", n);
     }
 
+    public record PrefixReq(String skuPrefix) {}
+
+    /** 카테고리 품목 코드 접두어 (예: 커피 CF → CF-0001) */
+    @PutMapping("/categories/{id}/sku-prefix")
+    public Map<String, Object> setPrefix(@PathVariable UUID id, @RequestBody PrefixReq r) {
+        CurrentUser.get().require(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR);
+        String p = r.skuPrefix() == null ? "" : r.skuPrefix().trim().toUpperCase();
+        if (!p.matches("[A-Z0-9]{1,6}")) throw ApiException.bad("접두어는 영문 대문자·숫자 1~6자입니다.");
+        db.sql("update catalog.category set sku_prefix = ? where id = ?").params(p, id).update();
+        return Map.of("ok", true);
+    }
+
+    /**
+     * 품목 코드 자동 생성: 카테고리 접두어 + 4자리 연번 (예: CF-0007).
+     * 같은 접두어로 시작하는 코드 중 숫자 4자리 형식의 최댓값 + 1. 화면에서 바꿔 쓸 수 있다.
+     */
+    @GetMapping("/next-sku")
+    public Map<String, Object> nextSku(@RequestParam UUID categoryId) {
+        CurrentUser.get().require(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR);
+        return Map.of("sku", nextSkuFor(categoryId));
+    }
+
+    String nextSkuFor(UUID categoryId) {
+        String prefix = db.sql("select coalesce(sku_prefix, upper(left(code, 2))) from catalog.category where id = ?").param(categoryId).query(String.class).optional()
+                .orElseThrow(() -> ApiException.notFound("카테고리"));
+        Integer max = db.sql("select coalesce(max(substring(sku from '^' || ? || '-(\\d{4})$')::int), 0) from catalog.item where sku ~ ('^' || ? || '-\\d{4}$')")
+                .params(prefix, prefix).query(Integer.class).single();
+        return prefix + "-" + String.format("%04d", max + 1);
+    }
+
+    static boolean hqView(CurrentUser u) { return u.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR); }
+
     /** 자산 여부: 설비 카테고리이거나, 카테고리 비품 기준 단가 이상 (고가 식기 → 비품) */
     boolean assetFor(UUID categoryId, long basePrice) {
         return db.sql("select is_asset or (asset_threshold is not null and ? >= asset_threshold) from catalog.category where id = ?")
@@ -64,7 +96,7 @@ public class CatalogController {
         CurrentUser u = CurrentUser.get();
         if (storeId != null) scope.check(u, storeId);
         return db.sql("""
-                select i.id, i.sku, i.name, i.unit, i.tax_type, i.base_price, i.is_asset, i.is_active, i.barcode,
+                select i.id, i.sku, i.name, i.unit, i.tax_type, i.base_price, i.hq_cost, i.is_asset, i.is_active, i.barcode,
                        i.category_id, c.name as category_name, c.division_code, d.name as division_name,
                        sp.id as store_price_id, sp.unit_price as store_unit_price, sp.discount_type, sp.discount_value,
                        coalesce(sp.unit_price, i.base_price) as list_price
@@ -77,27 +109,36 @@ public class CatalogController {
                   and (not :active or i.is_active)
                 order by d.sort_order, c.sort_order, i.name""")
                 .param("store", storeId).param("div", division).param("cat", categoryId).param("q", q == null || q.isBlank() ? null : q)
-                .param("active", activeOnly).query().listOfRows();
+                .param("active", activeOnly).query().listOfRows()
+                .stream().map(r -> { if (hqView(u)) return r; Map<String, Object> m = new LinkedHashMap<>(r); m.remove("hq_cost"); return m; }).toList();   // 본사 매입가는 물류 관리자 이상만
     }
 
     public record ItemReq(String sku, String name, UUID categoryId, String unit, String taxType, Long basePrice,
-                          Boolean isActive, String barcode) {}
+                          Boolean isActive, String barcode, Long hqCost) {}
 
     @PostMapping("/items")
     public Map<String, Object> createItem(@RequestBody ItemReq r) {
         CurrentUser.get().require(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR);
-        if (r.sku() == null || r.name() == null || r.categoryId() == null || r.basePrice() == null) throw ApiException.bad("코드·품명·카테고리·기준가는 필수입니다.");
+        if (r.name() == null || r.name().isBlank() || r.categoryId() == null || r.basePrice() == null) throw ApiException.bad("품명·카테고리·기준가는 필수입니다.");
+        String sku = r.sku() == null || r.sku().isBlank() ? nextSkuFor(r.categoryId()) : r.sku().trim().toUpperCase();   // 비우면 자동 생성
+        checkSku(sku, null);
         boolean asset = assetFor(r.categoryId(), r.basePrice());
         UUID id = UUID.randomUUID();
-        db.sql("insert into catalog.item(id, sku, name, category_id, unit, tax_type, base_price, is_asset, barcode) values (?,?,?,?,?,?,?,?,?)")
-                .params(id, r.sku(), r.name(), r.categoryId(), Objects.requireNonNullElse(r.unit(), "ea"),
-                        Objects.requireNonNullElse(r.taxType(), "TAXABLE"), r.basePrice(), asset, r.barcode()).update();
-        return Map.of("id", id);
+        db.sql("insert into catalog.item(id, sku, name, category_id, unit, tax_type, base_price, hq_cost, is_asset, barcode) values (?,?,?,?,?,?,?,?,?,?)")
+                .params(id, sku, r.name().trim(), r.categoryId(), Objects.requireNonNullElse(r.unit(), "ea"),
+                        Objects.requireNonNullElse(r.taxType(), "TAXABLE"), r.basePrice(), r.hqCost(), asset, r.barcode()).update();
+        return Map.of("id", id, "sku", sku);
     }
 
     @PutMapping("/items/{id}")
     public Map<String, Object> updateItem(@PathVariable UUID id, @RequestBody ItemReq r) {
         CurrentUser.get().require(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR);
+        if (r.sku() != null && !r.sku().isBlank()) {
+            String sku = r.sku().trim().toUpperCase();
+            checkSku(sku, id);
+            db.sql("update catalog.item set sku = ? where id = ?").params(sku, id).update();
+        }
+        if (r.hqCost() != null) db.sql("update catalog.item set hq_cost = ? where id = ?").params(r.hqCost() < 0 ? null : r.hqCost(), id).update();
         db.sql("""
                 update catalog.item set name = coalesce(cast(:n as varchar), name), unit = coalesce(cast(:u as varchar), unit),
                   tax_type = coalesce(cast(:t as varchar), tax_type), base_price = coalesce(cast(:p as bigint), base_price),
@@ -109,6 +150,12 @@ public class CatalogController {
                 update catalog.item i set is_asset = (c.is_asset or (c.asset_threshold is not null and i.base_price >= c.asset_threshold))
                 from catalog.category c where c.id = i.category_id and i.id = ?""").param(id).update();
         return Map.of("id", id);
+    }
+
+    void checkSku(String sku, UUID self) {
+        if (!sku.matches("[A-Z0-9][A-Z0-9-]{1,31}")) throw ApiException.bad("품목 코드는 영문 대문자·숫자·- 2~32자입니다.");
+        if (db.sql("select count(*) from catalog.item where sku = ? and (cast(? as uuid) is null or id <> ?)").params(sku, self, self).query(Integer.class).single() > 0)
+            throw ApiException.conflict("이미 쓰는 품목 코드입니다: " + sku);
     }
 
     public record StorePriceReq(UUID storeId, UUID itemId, Long unitPrice, String discountType, BigDecimal discountValue) {}

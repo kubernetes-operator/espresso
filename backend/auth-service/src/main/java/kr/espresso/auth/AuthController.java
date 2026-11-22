@@ -40,14 +40,15 @@ public class AuthController {
 
     @PostMapping("/api/auth/login")
     public Map<String, Object> login(@Valid @RequestBody LoginReq req, HttpServletRequest http) {
-        var row = db.sql("select id, name, password_hash, status, vat_display_override from auth.app_user where login_id = ?")
+        var row = db.sql("select id, name, password_hash, status, vat_display_override, initial_password from auth.app_user where login_id = ?")
                 .param(req.loginId()).query().listOfRows();
-        boolean ok = !row.isEmpty() && encoder.matches(req.password(), (String) row.get(0).get("password_hash"))
-                && "ACTIVE".equals(row.get(0).get("status"));
+        boolean pwOk = !row.isEmpty() && encoder.matches(req.password(), (String) row.get(0).get("password_hash"));
+        boolean active = pwOk && "ACTIVE".equals(row.get(0).get("status"));
         UUID uid = row.isEmpty() ? null : (UUID) row.get(0).get("id");
         db.sql("insert into auth.login_history(user_id, login_id, success, user_agent) values (?,?,?,?)")
-                .params(uid, req.loginId(), ok, http.getHeader("User-Agent")).update();
-        if (!ok) throw new ApiException(401, "LOGIN_FAILED", "아이디 또는 비밀번호가 올바르지 않습니다.");
+                .params(uid, req.loginId(), active, http.getHeader("User-Agent")).update();
+        if (!pwOk) throw new ApiException(401, "LOGIN_FAILED", "아이디 또는 비밀번호가 올바르지 않습니다.");
+        if (!active) throw new ApiException(403, "ACCOUNT_SUSPENDED", "정지된 계정입니다. 관리자에게 문의하세요.");
 
         db.sql("update auth.app_user set last_login_at = now() where id = ?").param(uid).update();
         Map<String, Object> u = row.get(0);
@@ -61,7 +62,8 @@ public class AuthController {
         String token = jwt.encode(JwtEncoderParameters.from(claims.build())).getTokenValue();
         return Map.of("accessToken", token, "expiresInSec", ttlHours * 3600,
                 "user", Map.of("id", uid, "loginId", req.loginId(), "name", u.get("name"),
-                        "assignments", asg, "vatOverride", Objects.toString(u.get("vat_display_override"), "")));
+                        "assignments", asg, "vatOverride", Objects.toString(u.get("vat_display_override"), ""),
+                        "initialPassword", Boolean.TRUE.equals(u.get("initial_password"))));
     }
 
     /** 활성 등급만 토큰에 포함 (비활성 등급: 슈퍼바이저 등) */
@@ -82,8 +84,15 @@ public class AuthController {
     @GetMapping("/api/auth/me")
     public Map<String, Object> me() {
         CurrentUser u = CurrentUser.get();
+        var row = db.sql("select status, initial_password, vat_display_override from auth.app_user where id = ?").param(u.id()).query().listOfRows();
+        if (row.isEmpty() || !"ACTIVE".equals(row.get(0).get("status"))) throw new ApiException(401, "ACCOUNT_SUSPENDED", "정지된 계정입니다.");
+        // 실제 배정만 (총괄·슈퍼바이저의 물류·인사 권한 확장은 각 서비스·화면에서 계산)
+        List<Map<String, Object>> raw = activeAssignments(u.id()).stream().map(a -> {
+            Map<String, Object> m = new LinkedHashMap<>(); m.put("role", a.get("r")); m.put("scopeType", a.get("t")); m.put("scopeId", a.get("s")); return m;
+        }).toList();
         return Map.of("id", u.id(), "loginId", u.loginId(), "name", u.name(),
-                "assignments", u.assignments(), "vatOverride", Objects.toString(u.vatOverride(), ""));
+                "assignments", raw, "vatOverride", Objects.toString(row.get(0).get("vat_display_override"), ""),
+                "initialPassword", Boolean.TRUE.equals(row.get(0).get("initial_password")));
     }
 
     /** 데모: 로그인 화면 계정 바로가기 (app.demo.show-accounts=false 이면 빈 목록) */

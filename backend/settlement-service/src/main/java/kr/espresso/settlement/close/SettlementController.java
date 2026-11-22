@@ -16,7 +16,12 @@ public class SettlementController {
     private final CoreClient core;
     private final JdbcClient db;
 
-    public SettlementController(SettlementService svc, CoreClient core, JdbcClient db) { this.svc = svc; this.core = core; this.db = db; }
+    private final WeekCloseService weeks;
+    private final PostCloseService post;
+
+    public SettlementController(SettlementService svc, CoreClient core, JdbcClient db, WeekCloseService weeks, PostCloseService post) {
+        this.svc = svc; this.core = core; this.db = db; this.weeks = weeks; this.post = post;
+    }
 
     /** 월 결산 (매장 1곳 또는 볼 수 있는 매장 합산). 매장관리자는 결산액·로열티 제외 요약 */
     @GetMapping("/settlement")
@@ -50,6 +55,66 @@ public class SettlementController {
         t.put("ratios", SettlementService.ratios(sales, (Long) t.get("cogs"), (Long) t.get("labor"), (Long) t.get("rent"), (Long) t.get("stock_loss"),
                 t.get("settlement_amount") == null ? 0 : (Long) t.get("settlement_amount")));
         return t;
+    }
+
+    /**
+     * 주 마감 목록 (월요일 시작). 매장 지정 시 그 매장, 없으면 볼 수 있는 매장 합산.
+     * 이번 주는 진행 중(실시간), 지난 주는 일요일 24시 자동 마감 스냅샷
+     */
+    @GetMapping("/settlement/weeks")
+    public Map<String, Object> weeks(@RequestParam(required = false) UUID storeId, @RequestParam String month) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.OWNER, Roles.STORE_MGR);
+        List<UUID> stores = storeId != null ? List.of(storeId) : new ArrayList<>(core.myStoreIds());
+        if (storeId != null) core.check(storeId);
+        java.time.YearMonth ym = java.time.YearMonth.parse(month);
+        java.time.LocalDate first = ym.atDay(1).with(java.time.DayOfWeek.MONDAY), last = ym.atEndOfMonth();
+        java.time.LocalDate thisMon = java.time.LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).with(java.time.DayOfWeek.MONDAY);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (java.time.LocalDate m = first; !m.isAfter(last); m = m.plusWeeks(1)) {
+            if (m.isAfter(thisMon)) break;
+            Map<String, Long> sum = new LinkedHashMap<>();
+            boolean closed = true; Object closedAt = null;
+            for (UUID s : stores) {
+                var row = db.sql("select data::text d, closed_at from stl.week_close where store_id = ? and week_start = ?").params(s, m).query().listOfRows();
+                Map<String, Object> d;
+                if (row.isEmpty()) { closed = false; d = weeks.compute(s, m); }
+                else { closedAt = row.get(0).get("closed_at"); try { d = new com.fasterxml.jackson.databind.ObjectMapper().readValue((String) row.get(0).get("d"), Map.class); } catch (Exception e) { d = Map.of(); } }
+                for (var e : d.entrySet()) if (e.getValue() instanceof Number n) sum.merge(e.getKey(), n.longValue(), Long::sum);
+            }
+            Map<String, Object> w = new LinkedHashMap<>(sum);
+            w.put("week_start", m.toString()); w.put("week_end", m.plusDays(6).toString());
+            w.put("status", m.equals(thisMon) ? "OPEN" : closed ? "CLOSED" : "PENDING");
+            w.put("closed_at", closedAt);
+            out.add(w);
+        }
+        return Map.of("weeks", out, "stores", stores.size());
+    }
+
+    /**
+     * 본사 매출 = 로열티 합계 + 물류 이득(매장 공급가 − 본사 출고 원가). 총괄·슈퍼바이저
+     */
+    @GetMapping("/hq/summary")
+    public Map<String, Object> hq(@RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.SUPERVISOR);
+        java.time.YearMonth ym = java.time.YearMonth.of(Integer.parseInt(period.substring(0, 4)), Integer.parseInt(period.substring(4)));
+        List<Map<String, Object>> stores = new ArrayList<>();
+        long royalty = 0;
+        for (var st : core.allStores()) {
+            if (!"STORE".equals(st.get("site_type"))) continue;
+            Map<String, Object> s = svc.summary(UUID.fromString(st.get("id").toString()), period);
+            long r = s.get("royalty") instanceof Number n ? n.longValue() : 0;
+            royalty += r;
+            stores.add(Map.of("store_id", st.get("id"), "store_name", st.get("name"), "royalty", r, "net_sales", s.get("net_sales"), "closed", s.get("closed")));
+        }
+        Map<String, Object> lg = core.hqLogistics(ym.atDay(1).toString(), ym.atEndOfMonth().toString());
+        long rev = ((Number) lg.getOrDefault("revenue", 0)).longValue(), cost = ((Number) lg.getOrDefault("cost", 0)).longValue();
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("period", period); out.put("royalty", royalty); out.put("logistics_revenue", rev); out.put("logistics_cost", cost);
+        out.put("logistics_margin", rev - cost); out.put("hq_sales", royalty + rev - cost);
+        out.put("stores", stores); out.put("logistics_by_store", lg.get("by_store")); out.put("requests", lg.get("requests"));
+        return out;
     }
 
     /** 결산 상세: 계정과목별 합계 */
@@ -88,6 +153,35 @@ public class SettlementController {
         u.require(Roles.HQ_ADMIN);
         svc.reopen(UUID.fromString(b.get("storeId")), b.get("period"), u.id());
         return Map.of("ok", true);
+    }
+
+    // ---------------- 마감 후 처리 (수정 결산) ----------------
+    @GetMapping("/settlement/post-close")
+    public Map<String, Object> postClose(@RequestParam UUID storeId, @RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        core.requireOn(u, storeId, Roles.OWNER);
+        return post.view(storeId, period);
+    }
+
+    @PostMapping("/settlement/post-close/pull")
+    public Map<String, Object> pull(@RequestBody Map<String, String> b) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        return post.pullBack(UUID.fromString(b.get("storeId")), b.get("period"), UUID.fromString(b.get("entryId")), b.get("memo"), u.id());
+    }
+
+    @PostMapping("/settlement/post-close/adjust")
+    public Map<String, Object> adjust(@RequestBody PostCloseService.AdjustReq r) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        return post.adjust(r, u.id());
+    }
+
+    @PostMapping("/settlement/post-close/recalc")
+    public Map<String, Object> recalc(@RequestBody Map<String, String> b) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN);
+        return post.recalc(UUID.fromString(b.get("storeId")), b.get("period"), b.get("memo"), u.id());
     }
 
     @GetMapping("/periods")

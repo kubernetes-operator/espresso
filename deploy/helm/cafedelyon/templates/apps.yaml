@@ -1,0 +1,112 @@
+# auth / core / settlement (Spring Boot) + web(nginx 정적)
+{{- $db := .Values.db.existingSecret }}
+{{- range $name, $svc := .Values.services }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "cdl.labels" $ | nindent 4 }}
+spec:
+  selector: { app: {{ $name }} }
+  ports: [{ name: http, port: {{ $svc.port }}, targetPort: {{ $svc.port }} }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "cdl.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # 단일 인스턴스 유지 (서명 키·Outbox 순서)
+  selector: { matchLabels: { app: {{ $name }} } }
+  template:
+    metadata:
+      labels: { app: {{ $name }}, app.kubernetes.io/part-of: cafedelyon }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001 }
+      containers:
+        - name: app
+          image: {{ include "cdl.image" (dict "root" $ "name" $name) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports: [{ containerPort: {{ $svc.port }}, name: http }]
+          env:
+            - { name: TZ, value: Asia/Seoul }
+            - { name: DB_URL, value: "jdbc:postgresql://pg-primary:5432/{{ if eq $name "settlement" }}settlement{{ else }}{{ $name }}{{ end }}_db" }
+            - { name: DB_USER, value: postgres }
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ $db }}, key: postgres-password } }
+            - { name: DEMO_SEED, value: {{ $.Values.demo.seed | quote }} }
+            {{- if eq $name "auth" }}
+            - { name: DEMO_SHOW_ACCOUNTS, value: {{ $.Values.demo.showAccounts | quote }} }
+            {{- else }}
+            - { name: JWKS_URI, value: "http://auth:8081/.well-known/jwks.json" }
+            - { name: AUTH_URL, value: "http://auth:8081" }
+            {{- end }}
+            {{- if eq $name "core" }}
+            - { name: SETTLEMENT_URL, value: "http://settlement:8083" }
+            - { name: UPLOAD_DIR, value: /data/uploads }
+            {{- end }}
+            {{- if eq $name "settlement" }}
+            - { name: CORE_URL, value: "http://core:8082" }
+            {{- end }}
+          startupProbe:
+            httpGet: { path: /actuator/health, port: http }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources: {{- toYaml $svc.resources | nindent 12 }}
+          {{- if eq $name "core" }}
+          volumeMounts: [{ name: uploads, mountPath: /data/uploads }]
+          {{- end }}
+      {{- if eq $name "core" }}
+      volumes:
+        - name: uploads
+          persistentVolumeClaim: { claimName: uploads }
+      {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  labels: {{- include "cdl.labels" . | nindent 4 }}
+spec:
+  selector: { app: web }
+  ports: [{ name: http, port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels: {{- include "cdl.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.web.replicas }}
+  selector: { matchLabels: { app: web } }
+  template:
+    metadata:
+      labels: { app: web, app.kubernetes.io/part-of: cafedelyon }
+    spec:
+      containers:
+        - name: web
+          image: {{ include "cdl.image" (dict "root" . "name" "web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ containerPort: 8080, name: http }]
+          readinessProbe: { httpGet: { path: /, port: http }, periodSeconds: 10 }
+          resources: {{- toYaml .Values.web.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: uploads
+  labels: {{- include "cdl.labels" . | nindent 4 }}
+  annotations: { helm.sh/resource-policy: keep }   # 삭제 시에도 첨부 파일 보존
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: {{ .Values.uploads.storageClass }}
+  resources: { requests: { storage: {{ .Values.uploads.size }} } }

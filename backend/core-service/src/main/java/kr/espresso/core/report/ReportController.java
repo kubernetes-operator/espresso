@@ -64,7 +64,7 @@ public class ReportController {
                     join hr.payroll_run pr on pr.id = p.payroll_run_id where e.user_id = ? and pr.store_id = ? and pr.period = ? and p.published_at is not null""")
                     .params(u.id(), store, period).query().listOfRows());
             sections.put("MY_REQUESTS", db.sql("""
-                    select count(*) total, count(*) filter (where status = 'COMPLETED') completed from logistics.request
+                    select count(*) total, count(*) filter (where status in ('COMPLETED','CLOSED')) completed from logistics.request
                     where created_by = ? and store_id = ? and created_at::date between ? and ?""").params(u.id(), store, r.get("period_from"), r.get("period_to")).query().singleRow());
         }
         db.sql("insert into report.access_log(snapshot_id, viewer_id, role_code, format) values (?,?,?,?)")
@@ -100,12 +100,38 @@ public class ReportController {
         if (st.isEmpty()) return List.of();
         boolean logi = u.has(Roles.HQ_ADMIN, Roles.LOGISTICS_MGR, Roles.OWNER), hr = u.has(Roles.HQ_ADMIN, Roles.HR_MGR, Roles.OWNER);
         List<Map<String, Object>> out = new ArrayList<>();
-        for (var s : db.sql("select s.id, s.name, s.code, r.name region_name from store.store s left join store.region r on r.id = s.region_id where s.id in (:st) order by s.code").param("st", st).query().listOfRows()) {
+        for (var s : db.sql("select s.id, s.name, s.code, r.name region_name from store.store s left join store.region r on r.id = s.region_id where s.id in (:st) and s.site_type = 'STORE' order by s.code").param("st", st).query().listOfRows()) {
             UUID id = (UUID) s.get("id");
             Map<String, Object> m = new LinkedHashMap<>(s);
+            m.putAll(metrics(id, period, ym, logi, hr));
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** 비교 기준값 (점주용): 전 매장 물류·인건비 지표의 최댓값·최솟값·평균 — 매장 이름 없음 */
+    @GetMapping("/compare/benchmark")
+    public Map<String, Object> benchmark(@RequestParam String period) {
+        CurrentUser u = CurrentUser.get();
+        u.require(Roles.HQ_ADMIN, Roles.OWNER);
+        YearMonth ym = ReportService.ym(period);
+        Map<String, List<Double>> vals = new LinkedHashMap<>();
+        int n = 0;
+        for (UUID id : db.sql("select id from store.store where site_type = 'STORE' and status = 'OPEN'").query(UUID.class).list()) {
+            n++;
+            metrics(id, period, ym, true, true).forEach((k, v) -> { if (v instanceof Number x) vals.computeIfAbsent(k, z -> new ArrayList<>()).add(x.doubleValue()); });
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        vals.forEach((k, v) -> out.put(k, Map.of("max", v.stream().mapToDouble(d -> d).max().orElse(0), "min", v.stream().mapToDouble(d -> d).min().orElse(0),
+                "avg", Math.round(v.stream().mapToDouble(d -> d).average().orElse(0) * 10) / 10.0)));
+        return Map.of("count", n, "metrics", out);
+    }
+
+    Map<String, Object> metrics(UUID id, String period, YearMonth ym, boolean logi, boolean hr) {
+            Map<String, Object> m = new LinkedHashMap<>();
             if (logi) {
                 m.putAll(db.sql("""
-                        select count(*) lr_count, coalesce(sum(total_amount) filter (where status = 'COMPLETED'),0) lr_amount,
+                        select count(*) lr_count, coalesce(sum(total_amount) filter (where status in ('COMPLETED','CLOSED')),0) lr_amount,
                           round(avg(extract(epoch from completed_at - requested_at)/3600) filter (where completed_at is not null)::numeric,1) lead_hours
                         from logistics.request where store_id = ? and created_at::date between ? and ?""").params(id, ym.atDay(1), ym.atEndOfMonth()).query().singleRow());
                 m.put("loss_amount", db.sql("select coalesce(sum(total_amount),0) from inventory.stock_adjustment where store_id = ? and status = 'APPROVED' and approved_at::date between ? and ?")
@@ -119,8 +145,6 @@ public class ReportController {
                 m.put("work_hours", db.sql("select round(coalesce(sum(regular_minutes + overtime_minutes),0) / 60.0, 1) from hr.work_record where store_id = ? and work_date between ? and ?")
                         .params(id, ym.atDay(1), ym.atEndOfMonth()).query(java.math.BigDecimal.class).single());
             }
-            out.add(m);
-        }
-        return out;
+            return m;
     }
 }

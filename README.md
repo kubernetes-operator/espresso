@@ -1,7 +1,7 @@
-# Espresso — 커피숍 물류·회계 통합 시스템
+# Cafe de Lyon (Espresso) — 커피숍 물류·회계 통합 시스템
 
 물류 요청·발송(음료/디저트/식기·포장/관리), 재고·손실·결손, 비품(설비·고가 식기), 매출·비용·결산·로열티·본사 정산, 급여, 등급별 리포트, 매장 비교, 투자 관리를
-계정 등급(총괄·물류·인적·점주·매장관리자·사원·투자자)과 매장 범위에 따라 나눠 쓰는 시스템입니다.
+계정 등급(총괄·물류·인사·점주·매장관리자·사원·투자자)과 매장 범위에 따라 나눠 쓰는 시스템입니다.
 
 ## 실행
 
@@ -12,7 +12,7 @@ cd deploy/compose && docker compose up -d --build # PostgreSQL primary+standby, 
 ```
 
 - 데모 계정 비밀번호는 모두 `demo1234` (데모 전용, `DEMO_SEED=false` 로 끄기). 계정·시나리오: [docs/TEST-SCENARIOS.md](docs/TEST-SCENARIOS.md)
-- 점검: `python3 tests/smoke_test.py` (계정별 권한·업무 흐름·식기·포장 61항목), `bash tests/check_replication.sh` (DB 2중화)
+- 점검: `python3 tests/smoke_test.py` (계정별 권한·업무 흐름·식기·포장·1~3차 점검·마감 후 처리 177항목), `bash tests/check_replication.sh` (DB 2중화)
 - CI: GitHub Actions `.github/workflows/smoke-test.yml` — PR·main·develop·feature/** 푸시마다 새 DB로 전체 구성을 띄워 위 두 점검을 실행 (`tests/wait_ready.py`로 기동·시드 대기, 실패 시 서비스 로그 출력)
 - 계정 서비스는 기동할 때 토큰 서명 키를 메모리에 새로 만듭니다 → 재시작하면 다시 로그인. 운영에서는 KMS/Secret 키로 교체.
 
@@ -46,3 +46,26 @@ cd deploy/compose && docker compose up -d --build # PostgreSQL primary+standby, 
 | 전자세금계산서 | 대기열 + 승인번호 수기 입력 (발행 대행사 선정 후 연동) |
 | 레시피 기반 재고 차감, POS 연동, 매장 간 이동 | 4차 범위 |
 | 급여 요율·간이세액표 | 데모 값/추정 — 운영 전 고시값 등록 필요 |
+
+## Kubernetes 배포 (cafedelyon)
+
+| 항목 | 값 |
+|---|---|
+| 주소 | https://lyon.studiobasa.com (공용 Gateway `default/gateway` 에 HTTPRoute 연결) |
+| 네임스페이스 | `cafedelyon` |
+| 이미지 | `registry.local.cloud:5000/cafedelyon/{auth,core,settlement,web}:<커밋 7자리>` — `deploy/images.sh [--push]` |
+| 차트 | `deploy/helm/cafedelyon` (PostgreSQL primary+standby StatefulSet, 서비스 4개, 업로드 PVC, 업로드 크기 정책) |
+
+```bash
+# 1) DB 자격 증명 Secret — 운영자가 직접 생성 (차트·저장소에 값 없음)
+kubectl create namespace cafedelyon
+kubectl -n cafedelyon create secret generic cafedelyon-db \
+  --from-literal=postgres-password='<직접 정한 값>' --from-literal=replication-password='<직접 정한 값>'
+# 2) 이미지
+deploy/images.sh --push
+# 3) 설치·업그레이드
+helm upgrade --install cafedelyon deploy/helm/cafedelyon -n cafedelyon --set image.tag=$(git rev-parse --short=7 HEAD)
+```
+- TLS: 공용 인증서(`default/letsencrypt-issuer-public-cert`)의 dnsNames 에 도메인 추가 필요(공용 리소스 변경).
+- DNS: Cloudflare 에 `lyon.studiobasa.com` 레코드 필요.
+- 서명 키(메모리)·Outbox 순서 때문에 auth·core 는 1개 인스턴스. 데모 데이터는 `demo.seed=false` 로 끔.

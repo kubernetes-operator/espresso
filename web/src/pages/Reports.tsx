@@ -50,7 +50,7 @@ export function ReportView() {
   const r = d.data
   if (!r) return <Page title="리포트"><ErrorBox error={d.error} /></Page>
   const S = r.sections
-  const roleLabel = [...s.roles].map(x => ROLE_NAMES[x]).join(' · ')
+  const roleLabel = [...s.baseRoles].map(x => ROLE_NAMES[x]).join(' · ')
   const kpi = S.KPI
   return (
     <div className="report-wrap">
@@ -110,7 +110,7 @@ export function ReportView() {
               : <tr><td colSpan={2} className="muted">발행된 명세서 없음</td></tr>}
           </tbody></table></section>}
         </div>
-        <footer className="rp-foot">Espresso · 이 리포트는 발행 시점의 스냅샷입니다. 섹션 노출은 등급과 매장 설정(개인별 급여 열람)에 따릅니다.</footer>
+        <footer className="rp-foot">Cafe de Lyon · 이 리포트는 발행 시점의 스냅샷입니다. 섹션 노출은 등급과 매장 설정(개인별 급여 열람)에 따릅니다.</footer>
       </article>
     </div>
   )

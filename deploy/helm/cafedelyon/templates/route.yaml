@@ -1,0 +1,39 @@
+# 공용 Gateway(default/gateway) 에 연결. /internal/** 은 라우팅하지 않아 외부에서 접근 불가
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: cafedelyon-route
+  labels: {{- include "cdl.labels" . | nindent 4 }}
+spec:
+  hostnames: [{{ .Values.host | quote }}]
+  parentRefs:
+    {{- range .Values.gateway.sectionNames }}
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $.Values.gateway.name }}
+      namespace: {{ $.Values.gateway.namespace }}
+      sectionName: {{ . }}
+    {{- end }}
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /api/auth } }, { path: { type: PathPrefix, value: /.well-known } }]
+      backendRefs: [{ name: auth, port: 8081 }]
+    - matches: [{ path: { type: PathPrefix, value: /api/core } }]
+      backendRefs: [{ name: core, port: 8082 }]
+    - matches: [{ path: { type: PathPrefix, value: /api/stl } }]
+      backendRefs: [{ name: settlement, port: 8083 }]
+    - matches: [{ path: { type: PathPrefix, value: / } }]
+      backendRefs: [{ name: web, port: 8080 }]
+---
+# 첨부·엑셀 업로드 크기 (NGINX Gateway Fabric 정책)
+apiVersion: gateway.nginx.org/v1alpha1
+kind: ClientSettingsPolicy
+metadata:
+  name: cafedelyon-upload-size
+  labels: {{- include "cdl.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: cafedelyon-route
+  body:
+    maxSize: {{ .Values.clientMaxBodySize | quote }}

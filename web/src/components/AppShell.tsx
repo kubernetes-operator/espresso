@@ -3,8 +3,8 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { dt } from '../format'
 import { useSession } from '../session'
-import { visibleMenu, type MenuItem } from '../menu'
-import { ROLE_NAMES } from '../format'
+import { visibleMenu, menuFor, type MenuItem } from '../menu'
+import { ROLE_NAMES, SITE_TYPES } from '../format'
 
 const TABS: { key: NonNullable<MenuItem['mobileTab']>; label: string; icon: string }[] = [
   { key: 'home', label: '홈', icon: '⌂' },
@@ -23,6 +23,15 @@ export function AppShell() {
   const [pending, setPending] = useState(0)
   const [noti, setNoti] = useState<{ items: any[]; unread: number }>({ items: [], unread: 0 })
   const [notiOpen, setNotiOpen] = useState(false)
+  // 다른 화면으로 가거나 바깥을 누르면 알림 창 닫기
+  useEffect(() => { setNotiOpen(false) }, [loc.pathname])
+  useEffect(() => {
+    if (!notiOpen) return
+    const h = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.noti')) setNotiOpen(false) }
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') setNotiOpen(false) }
+    document.addEventListener('mousedown', h); document.addEventListener('keydown', k)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
+  }, [notiOpen])
   useEffect(() => {
     let alive = true
     const load = () => {
@@ -34,18 +43,22 @@ export function AppShell() {
     return () => { alive = false; clearInterval(t) }
   }, [loc.pathname])
   const groups = [...new Set(menu.map(m => m.group))]
-  const roleLabel = [...s.roles].map(r => ROLE_NAMES[r] ?? r).join(' · ')
+  const cur = menuFor(loc.pathname)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const siteGroups = (['HQ', 'STORE', 'BAKERY'] as const).map(t => ({ t, list: s.stores.filter(x => (x.site_type ?? 'STORE') === t) })).filter(g => g.list.length)
+  const roleLabel = [...s.baseRoles].map(r => ROLE_NAMES[r] ?? r).join(' · ')
 
   return (
     <div className="shell">
       <aside className="side" aria-label="주 메뉴">
-        <div className="brand"><span className="logo">●</span><span className="brand-name">Espresso</span></div>
+        <div className="brand"><span className="brand-name">Cafe de Lyon</span><span className="brand-short" aria-hidden>CdL</span></div>
         <nav>
           {groups.map(g => (
             <div key={g} className="nav-group">
               <div className="nav-group-label">{g}</div>
               {menu.filter(m => m.group === g).map(m => (
-                <NavLink key={m.path} to={m.path} end={m.path === '/'} className="nav-item" title={m.label}>
+                <NavLink key={m.path} to={m.path} end={m.path === '/'} title={`${m.label} — ${m.desc}`}
+                  className={() => `nav-item ${cur?.path === m.path ? 'active' : ''}`}>
                   <span className="nav-icon" aria-hidden>{m.icon}</span><span className="nav-label">{m.label}</span>
                   {m.path === '/approvals' && pending > 0 && <span className="count">{pending}</span>}
                 </NavLink>
@@ -58,12 +71,16 @@ export function AppShell() {
       <div className="main">
         <header className="topbar">
           <div className="store-picker">
-            {s.stores.length > 1 ? (
+            {cur?.fixAll && s.has(...cur.fixAll) ? (
+              <select id="store-select" aria-label="매장 선택" value="ALL" disabled title="이 화면은 전체로 고정됩니다"><option value="ALL">전체 (합산)</option></select>
+            ) : s.stores.length > 1 ? (
               <select id="store-select" aria-label="매장 선택" value={s.storeId} onChange={e => s.setStoreId(e.target.value)}>
-                {s.stores.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
-                <option value="ALL">전체 (합산)</option>
+                {siteGroups.map(g => <optgroup key={g.t} label={SITE_TYPES[g.t]}>
+                  {g.list.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
+                </optgroup>)}
+                <option value="ALL">{cur && cur.all === false ? '전체 (이 화면은 매장 선택 필요)' : '전체 (합산)'}</option>
               </select>
-            ) : s.stores.length === 1 ? <strong>{s.stores[0].name}</strong> : <strong>본사</strong>}
+            ) : s.stores.length === 1 ? <strong>{s.stores[0].name}</strong> : <strong>{s.has('INVESTOR') ? '투자자' : '본사'}</strong>}
             <span className={`badge ${s.vatMode === 'INCLUSIVE' ? 'accent' : 'neutral'}`} title="계정 지정값이 있으면 그 값을, 없으면 매장 기본값을 따릅니다">
               VAT {s.vatMode === 'INCLUSIVE' ? '포함' : '별도'}
             </span>
@@ -88,7 +105,17 @@ export function AppShell() {
             <button className="ghost small" onClick={() => { s.logout(); nav('/login') }}>로그아웃</button>
           </div>
         </header>
-        <main className="content" key={loc.pathname}>
+        {s.user?.initialPassword && loc.pathname !== '/' && (
+          <div className="pw-banner">초기 비밀번호를 쓰고 있습니다. <button className="ghost small" onClick={() => nav('/')}>홈에서 비밀번호 바꾸기</button></div>
+        )}
+        {cur && (
+          <div className="page-help">
+            <span><b>{cur.label}</b> · {cur.desc}</span>
+            {cur.tips?.length ? <button className="ghost small" aria-expanded={helpOpen} onClick={() => setHelpOpen(o => !o)}>{helpOpen ? '도움말 닫기' : '사용법'}</button> : null}
+            {helpOpen && cur.tips && <ul>{cur.tips.map(t => <li key={t}>{t}</li>)}</ul>}
+          </div>
+        )}
+        <main className="content" key={loc.pathname + s.storeId}>
           <Outlet />
         </main>
       </div>

@@ -34,6 +34,11 @@ export function Compare() {
   const core = useApi<any[]>(`/api/core/compare?period=${period}`, [period])
   const [region, setRegion] = useState('')
   const [sortKey, setSortKey] = useState('net_sales')
+  // 점주: 전체 매장 기준값(이름 없이 최댓값·최솟값·평균)으로 상/하위 매장과 비교
+  const ownerMode = s.has('OWNER') && !s.has('HQ_ADMIN', 'LOGISTICS_MGR', 'HR_MGR')
+  const bStl = useApi<any>(ownerMode ? `/api/stl/compare/benchmark?period=${period}` : null, [period])
+  const bCore = useApi<any>(ownerMode ? `/api/core/compare/benchmark?period=${period}` : null, [period])
+  const [eachStore, setEachStore] = useState(false)
 
   const rows = useMemo(() => {
     const m = new Map<string, any>()
@@ -63,6 +68,8 @@ export function Compare() {
   const sorted = [...rows].sort((a, b) => Number(b[sortKey] ?? -Infinity) - Number(a[sortKey] ?? -Infinity))
   const regions = [...new Set((core.data ?? []).map(c => c.region_name))]
   const sortMetric = METRICS.find(m => m.key === sortKey)
+  if (ownerMode) return <OwnerCompare month={month} setMonth={setMonth} rows={rows} bench={{ ...(bCore.data?.metrics ?? {}), ...(bStl.data?.metrics ?? {}) }}
+    count={Math.max(bStl.data?.count ?? 0, bCore.data?.count ?? 0)} error={stl.error || core.error || bStl.error || bCore.error} eachStore={eachStore} setEachStore={setEachStore} />
   return (
     <Page title="매장 비교" sub={s.has('HQ_ADMIN') ? '전 매장 손익·물류·인건비 지표 · 평균에서 크게 벗어난 값 강조' : s.has('LOGISTICS_MGR') ? '물류 지표만 표시' : s.has('HR_MGR') ? '인건비 지표만 표시' : '내 매장끼리 비교'}
       actions={<>
@@ -86,6 +93,57 @@ export function Compare() {
         <ol className="rank">{sorted.filter(r => r[sortKey] != null).map((r, i) => <li key={r.id}><span>{i + 1}. {r.name}</span><b className="tnum">{sortMetric.fmt(r[sortKey])}</b></li>)}</ol>
       </section>}
       <p className="muted small"><Badge tone="ok">초록</Badge> 평균보다 좋은 쪽으로 1표준편차 이상, <Badge tone="bad">빨강</Badge> 나쁜 쪽. 매장이 많을 때는 권역으로 좁혀 보세요.</p>
+    </Page>
+  )
+}
+
+/**
+ * 점주 비교 규칙
+ *  - 내 매장 3개 이하: 내 매장 각각 + 전체 매장 중 상위 1개 + 하위 1개
+ *  - 4개 이상: 내 매장 평균 + 상위 1개 + 하위 1개 (매장별 보기 전환 가능)
+ * 상위/하위는 지표마다 좋은 쪽(매출↑, 원가율↓ 등) 기준이며 다른 매장 이름은 보이지 않습니다.
+ */
+function OwnerCompare({ month, setMonth, rows, bench, count, error, eachStore, setEachStore }: any) {
+  const many = rows.length > 3
+  const showEach = !many || eachStore
+  const metrics = METRICS.filter(mt => rows.some((r: any) => r[mt.key] !== undefined) || bench[mt.key])
+  const best = (mt: Metric) => { const b = bench[mt.key]; return b == null ? null : mt.better === 'high' ? b.max : b.min }
+  const worst = (mt: Metric) => { const b = bench[mt.key]; return b == null ? null : mt.better === 'high' ? b.min : b.max }
+  const myAvg = (mt: Metric) => { const v = rows.map((r: any) => Number(r[mt.key])).filter((x: number) => !isNaN(x)); return v.length ? v.reduce((a: number, b: number) => a + b, 0) / v.length : null }
+  const fmtv = (mt: Metric, v: number | null) => v == null ? '—' : mt.ratio ? `${Math.round(v * 10) / 10}%` : mt.fmt(Math.round(v))
+  const tone = (mt: Metric, v: number | null) => {
+    const b = bench[mt.key]; if (v == null || !b || b.max === b.min) return ''
+    const pos = (v - b.min) / (b.max - b.min)   // 0 = 최솟값, 1 = 최댓값
+    const good = mt.better === 'high' ? pos : 1 - pos
+    return good >= 0.75 ? 'good' : good <= 0.25 ? 'bad' : ''
+  }
+  return (
+    <Page title="매장 비교" sub={many ? `내 매장 ${rows.length}곳 평균을 전체 ${count}개 매장의 상위·하위 매장과 비교` : `내 매장을 전체 ${count}개 매장의 상위·하위 매장 1곳씩과 비교`}
+      actions={<>
+        <input id="cmp-month" type="month" aria-label="월" value={month} onChange={e => setMonth(e.target.value)} />
+        {many && <label className="switch"><input type="checkbox" checked={eachStore} onChange={e => setEachStore(e.target.checked)} /><span>내 매장 각각 보기</span></label>}
+      </>}>
+      <ErrorBox error={error} />
+      <div className="card table-wrap">
+        <table className="tbl compare">
+          <thead><tr><th>지표</th>
+            {showEach ? rows.map((r: any) => <th key={r.id} className="num">{r.name}<br /><small className="muted">내 매장</small></th>) : null}
+            {many && <th className="num">내 매장 평균<br /><small className="muted">{rows.length}곳</small></th>}
+            <th className="num">상위 매장<br /><small className="muted">지표별 1위</small></th>
+            <th className="num">하위 매장<br /><small className="muted">지표별 최하위</small></th>
+            <th className="num">전체 평균</th></tr></thead>
+          <tbody>{metrics.map(mt => (
+            <tr key={mt.key}>
+              <td>{mt.label}</td>
+              {showEach ? rows.map((r: any) => <td key={r.id} className={`num ${tone(mt, r[mt.key] == null ? null : Number(r[mt.key]))}`}>{mt.fmt(r[mt.key])}</td>) : null}
+              {many && <td className={`num ${tone(mt, myAvg(mt))}`}><b>{fmtv(mt, myAvg(mt))}</b></td>}
+              <td className="num muted">{fmtv(mt, best(mt))}</td>
+              <td className="num muted">{fmtv(mt, worst(mt))}</td>
+              <td className="num muted">{fmtv(mt, bench[mt.key]?.avg ?? null)}</td>
+            </tr>))}</tbody>
+        </table>
+      </div>
+      <p className="muted small">상위·하위는 지표마다 좋은 쪽 기준입니다(매출·이익은 높을수록, 원가율·손실은 낮을수록 좋음). 다른 매장의 이름은 보이지 않습니다. <Badge tone="ok">초록</Badge> 전체 상위 25% 안, <Badge tone="bad">빨강</Badge> 하위 25% 안.</p>
     </Page>
   )
 }
